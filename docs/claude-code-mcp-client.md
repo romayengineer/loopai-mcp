@@ -232,11 +232,143 @@ For example:
 
 This applies to all hook events and permission rules.
 
-## Key Architectural Implications for LoopAI-MCP
+## LoopAI-MCP Integration via Agent SDK
 
-1. **Claude Code is opaque** — the MCP protocol is the integration surface, not the internal API
-2. **Tool calls are JSON-RPC** — the backend must understand JSON-RPC 2.0 message schemas
-3. **Events are the input** — Claude Code fires hook events that can be intercepted, but the server does not embed a Claude Code client. Instead, it receives event streams from the client shim
-4. **Capability negotiation is mandatory** — every MCP connection requires initialization handshake
-5. **MCP tools are how Claude acts** — the server exposes enforcement gates (compile/lint/test) as MCP tools that the client-side LLM calls
-6. **Bidirectional communication is possible** — via sampling (server asks LLM), elicitation (server asks user), and notifications (server pushes updates)
+LoopAI-MCP does NOT use Claude Code's MCP protocol for event streaming or prompt injection. Instead, the **client shim owns the agent loop** by wrapping Claude's Agent SDK, giving it full control over all messages flowing in and out of the LLM. The MCP protocol is only used for tool serving — the Go backend exposes enforcement tools (compile/lint/test) as a standard MCP server that Claude calls when it decides to.
+
+### Architecture
+
+```
+                  ┌─────────────────────────────────────┐
+                  │         Go Backend (server)          │
+                  │  - receives events from shim         │
+                  │  - decides: allow / deny / inject    │
+                  │  - enforces compile → lint → test    │
+                  │  - exposes MCP server with tools     │
+                  └──────┬──────────────────┬───────────┘
+                         │ HTTP/WebSocket   │ MCP protocol
+                         │ (event stream)   │ (tool serving)
+                 ┌───────▼──────────┐  ┌────▼──────────┐
+                 │   Client Shim    │  │  Claude Code  │
+                 │ (Python / TS)    │  │  (LLM + tools)│
+                 │                  │  │               │
+                 │ owns Agent SDK   │  │ calls MCP     │
+                 │ loop, forwards   │  │ tools on the  │
+                 │ every message to │  │ Go backend    │
+                 │ Go backend       │  │ when needed   │
+                 └───────┬──────────┘  └───────────────┘
+                         │ Agent SDK stream
+                 ┌───────▼──────────┐
+                 │  Claude Agent    │
+                 │  SDK             │
+                 │  (LLM calls,     │
+                 │   tool exec)     │
+                 └──────────────────┘
+```
+
+### The shim owns the loop
+
+The shim does NOT launch the `claude` CLI. It imports the Agent SDK directly and drives the agent loop programmatically. This means the shim controls when messages are sent to the LLM, when tools execute, and when the loop advances — the Go backend is the decision-maker, and the shim is the executor.
+
+Pseudocode for the shim's inner loop:
+
+```
+for each message in agent_sdk.stream(prompt):
+    forward message to Go backend
+    decision = wait for backend response
+
+    if decision.action == "allow":
+        continue  // let the SDK execute tools normally
+
+    elif decision.action == "deny":
+        skip tool execution, return denial to LLM
+
+    elif decision.action == "inject":
+        agent_sdk.send_message(decision.prompt)
+        // LLM processes injected prompt, loop continues
+```
+
+### Event Flow (per turn)
+
+```
+1. Agent SDK yields AssistantMessage
+   └── contains text blocks + tool call requests from LLM
+
+2. Shim intercepts, serializes, forwards to Go backend
+   POST /events { type: "tool_calls", tool_calls: [...] }
+
+3. Backend evaluates:
+   - checks enforcement rules (compile/lint/test gates)
+   - decides next action
+
+4. Backend responds with a decision:
+   { action: "allow" }
+   { action: "deny", reason: "..." }
+   { action: "inject", prompt: "fix the failing test..." }
+
+5a. ALLOW: shim lets the SDK execute tools normally,
+          then forwards tool results back to backend
+
+5b. DENY: shim skips execution, returns a fake tool
+          result with the denial reason to the LLM
+
+5c. INJECT: shim calls agent_sdk.send_message(injected_prompt),
+            which sends a synthetic user message into the stream.
+            The LLM processes it as a normal prompt.
+            The loop continues from step 1.
+```
+
+### Prompt Injection Detail
+
+When the Go backend decides to inject a prompt (e.g., after a compile failure), it returns `{ action: "inject", prompt: "..." }`. The shim calls the Agent SDK's streaming input method, passing the prompt text as a new user message. The SDK treats this as if the user typed it — the LLM receives it, generates a response, and the loop resumes. This is the mechanism for "the server prompts the model to fix failures."
+
+### Wire Protocol (Shim ↔ Backend)
+
+The shim and backend communicate over HTTP or WebSocket. The protocol is minimal:
+
+**Events (shim → backend):**
+
+| Event | When | Payload |
+|---|---|---|
+| `tool_calls` | LLM requests tool calls | `{ tool_calls: [{name, args}] }` |
+| `tool_results` | Tools finish executing | `{ tool_calls: [{name, result}] }` |
+| `text_response` | LLM produces text | `{ text: "..." }` |
+| `turn_end` | Turn completes | `{ turn_summary }` |
+| `session_start` | Session begins | `{ session_id }` |
+| `session_end` | Session ends | `{ session_id, reason }` |
+
+**Decisions (backend → shim):**
+
+| Action | Effect |
+|---|---|
+| `allow` | Let the current message through normally |
+| `deny` | Block tool execution, return denial to LLM |
+| `inject` | Send `prompt` into the SDK stream as a user message |
+
+### Enforcement Gate Flow (Example)
+
+```
+1. Claude calls Bash to run compile
+2. Shim forwards tool call to Go backend
+3. Backend: "allow, but flag for post-execution check"
+4. Tool executes, shim forwards result (compile failed)
+5. Backend: { action: "inject", prompt: "compile error in
+   src/main.go:23 — fix it before proceeding" }
+6. Shim injects prompt into the SDK stream
+7. LLM receives the prompt, reads the file, edits it
+8. Loop continues
+```
+
+### Relationship with MCP
+
+The shim also configures a standard MCP connection from Claude Code to the Go backend. This is separate from the event stream: it is for **tool serving only**. The Go backend registers tools like `compile_project`, `run_lint`, `run_tests` as MCP tools. Claude can call these directly through the normal MCP flow, and their results arrive in the event stream like any other tool call.
+
+```
+Two independent communication channels:
+
+1. Event stream (shim ↔ backend):
+   HTTP/WS, owns the loop, carries all events and decisions
+
+2. MCP protocol (Claude Code LLM ↔ backend):
+   Standard MCP, carries tool invocations only
+```
