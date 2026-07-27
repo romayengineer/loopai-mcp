@@ -372,3 +372,68 @@ Two independent communication channels:
 2. MCP protocol (Claude Code LLM ↔ backend):
    Standard MCP, carries tool invocations only
 ```
+
+## Deployment
+
+### The shim replaces the CLI
+
+The user never runs `claude` directly. The shim IS the entry point. Internally it imports the Agent SDK and drives the loop programmatically — no `claude` binary is involved.
+
+**Python shim:**
+```
+pip install loopai-mcp      # or: uv tool install loopai-mcp
+loopai "build the auth module"
+```
+
+**TypeScript shim:**
+```
+npm install -g @loopai/mcp
+loopai "build the auth module"
+```
+
+### Go backend is a separate binary
+
+The Go backend is installed and managed independently from the shim.
+
+```
+go install github.com/romayengineer/loopai-mcp/backend/go/cmd/...@latest
+# or
+brew install loopai-mcp/tap/loopai-backend
+```
+
+```
+loopai-backend
+# starts on :8090 by default
+```
+
+### How they connect
+
+The shim discovers the backend through configuration:
+
+| Method | Config |
+|---|---|
+| Env var | `LOOPAI_BACKEND_URL=http://localhost:8090` |
+| CLI flag | `loopai --backend http://localhost:8090 "prompt"` |
+| Config file | `~/.config/loopai/config.toml` `[backend] url = "http://localhost:8090"` |
+
+The Go backend must be running before the shim starts. If unreachable, the shim fails fast with a connection error.
+
+### Workflow
+
+```
+terminal 1 $ loopai-backend
+             ← Go backend listening on :8090
+
+terminal 2 $ loopai "refactor the auth module"
+             ← shim connects to :8090
+             ← shim imports Agent SDK
+             ← shim owns the loop, forwards events to backend
+             ← backend makes decisions, injects prompts as needed
+```
+
+### Why two separate installs
+
+| Component | Language | Update cadence | Runs where |
+|---|---|---|---|
+| Shim | Python (or TS) | Matches Agent SDK releases | Developer machine, as CLI |
+| Backend | Go | Independent | Developer machine, CI, server |
