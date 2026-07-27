@@ -13,22 +13,42 @@ Claude Code (MCP Host)
 
 ## Supported Languages
 
-MCP clients themselves are transport-agnostic (they speak JSON-RPC 2.0 over stdio or HTTP). The **client implementation** varies by surface:
+### Claude Agent SDK (programmatic agent loop)
 
-| Surface | Client Language | SDK / Package |
+Two official SDKs for embedding Claude Code's agent loop into your own application:
+
+| Language | Package | License | Min Version |
+|---|---|---|---|
+| **Python** | `claude-agent-sdk` (PyPI) | MIT | Python 3.10+ |
+| **TypeScript** | `@anthropic-ai/claude-agent-sdk` (npm) | MIT | Node.js 18+ |
+
+These are the SDKs used by the LoopAI-MCP client shim to own the agent loop. Both bundle a native Claude Code binary — no separate CLI install is needed.
+
+For all other languages, run the CLI programmatically via `claude -p` with `--output-format json` (see [headless mode](https://code.claude.com/docs/en/headless)).
+
+### MCP SDK (building servers)
+
+MCP servers can be built in any language with an MCP SDK:
+
+| Language | SDK / Package |
+|---|---|
+| **Python** | `mcp` package |
+| **TypeScript** | `@modelcontextprotocol/sdk` |
+| **Java** | Spring AI MCP / `kotlin-sdk` |
+| **Kotlin** | `kotlin-sdk` |
+| **C#** | `ModelContextProtocol` |
+
+### Claude Code surfaces (client implementations)
+
+The Claude Code client itself (as an MCP host) runs on these surfaces:
+
+| Surface | Language | SDK / Package |
 |---|---|---|
 | Terminal CLI | TypeScript (Node.js) | `@anthropic-ai/sdk`, `@modelcontextprotocol/sdk` |
 | VS Code / JetBrains | TypeScript | Extension API + same SDK |
 | Desktop app | TypeScript (Electron) | Same SDK |
-| Agent SDK (Python) | Python | `claude-agent-sdk` + `mcp` |
-| Agent SDK (TypeScript) | TypeScript | `@anthropic-ai/claude-agent-sdk` |
 
-MCP servers can be built in any language with an MCP SDK:
-- **Python** (`mcp` package)
-- **TypeScript** (`@modelcontextprotocol/sdk`)
-- **Java** (Spring AI / `kotlin-sdk`)
-- **Kotlin** (`kotlin-sdk`)
-- **C#** (`ModelContextProtocol`)
+MCP clients are transport-agnostic (JSON-RPC 2.0 over stdio or HTTP), so any language with HTTP support can act as an MCP client.
 
 ## Transport Layer
 
