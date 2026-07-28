@@ -55,16 +55,11 @@ func main() {
 		errCh <- err
 	}()
 
-	firstErr := <-errCh
+	<-errCh
 	idle.Stop()
-
-	if firstErr != nil {
-		log.Printf("pipe error: %v", firstErr)
-	}
 
 	<-proc.Wait()
 	exitCode := proc.ExitCode()
-	log.Printf("exit code = %d", exitCode)
 	pc.Send(proto.NewMessage(proto.MsgExited, proto.ExitedPayload{
 		Code: exitCode,
 	}))
