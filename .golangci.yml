@@ -8,9 +8,6 @@ linters:
     - unused
     - misspell
   exclusions:
-    generate:
-      rules:
-        - (?i)\.pb\.go
     presets:
       - comments
       - common-false-positives
