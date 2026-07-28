@@ -1,5 +1,1 @@
-Build succeeded. Now run the linter:
-
-```
-golangci-lint run ./...
-```
+Review the code, analyze it and improve it, do not ask questions, you are a great developer follow best practices, always write tests, unit test, integration tests, documment everything, implement good interfaces, add logging, good error handling, etc

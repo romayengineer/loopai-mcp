@@ -1,3 +1,3 @@
-The last compile attempt detected errors. Fix them and re-run `go build ./...`.
+The last compile attempt detected errors. Fix them
 
 {{.Errors}}
