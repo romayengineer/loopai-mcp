@@ -252,168 +252,134 @@ For example:
 
 This applies to all hook events and permission rules.
 
-## LoopAI-MCP Integration via Agent SDK
+## LoopAI-MCP Integration via Terminal I/O (PTY)
 
-LoopAI-MCP does NOT use Claude Code's MCP protocol for event streaming or prompt injection. Instead, the **client shim owns the agent loop** by wrapping Claude's Agent SDK, giving it full control over all messages flowing in and out of the LLM. The MCP protocol is only used for tool serving — the Go backend exposes enforcement tools (compile/lint/test) as a standard MCP server that Claude calls when it decides to.
+LoopAI-MCP does NOT use Claude Code's MCP protocol, Agent SDK, or plugin system for process control. Instead, the **launcher** allocates a PTY, spawns the client inside it, and controls it through terminal I/O — the same interface a human user would use. The client has no idea it is being driven programmatically.
 
 ### Architecture
 
 ```
-                  ┌─────────────────────────────────────┐
-                  │         Go Backend (server)          │
-                  │  - receives events from shim         │
-                  │  - decides: allow / deny / inject    │
-                  │  - enforces compile → lint → test    │
-                  │  - exposes MCP server with tools     │
-                  └──────┬──────────────────┬───────────┘
-                         │ HTTP/WebSocket   │ MCP protocol
-                         │ (event stream)   │ (tool serving)
-                 ┌───────▼──────────┐  ┌────▼──────────┐
-                 │   Client Shim    │  │  Claude Code  │
-                 │ (Python / TS)    │  │  (LLM + tools)│
-                 │                  │  │               │
-                 │ owns Agent SDK   │  │ calls MCP     │
-                 │ loop, forwards   │  │ tools on the  │
-                 │ every message to │  │ Go backend    │
-                 │ Go backend       │  │ when needed   │
-                 └───────┬──────────┘  └───────────────┘
-                         │ Agent SDK stream
-                 ┌───────▼──────────┐
-                 │  Claude Agent    │
-                 │  SDK             │
-                 │  (LLM calls,     │
-                 │   tool exec)     │
-                 └──────────────────┘
+                  ┌──────────────────────────────────────────┐
+                  │          Go Backend (server)              │
+                  │  - reads terminal output byte stream      │
+                  │  - decides: type prompt / send Ctrl+C     │
+                  │  - enforces compile → lint → test         │
+                  │  - exposes MCP server with enforcement    │
+                  │    tools for Claude's direct use          │
+                  └────────────┬──────────────────┬───────────┘
+                               │ HTTP/WS          │ MCP protocol
+                               │ (control)        │ (tool serving)
+                      ┌────────▼────────┐  ┌─────▼──────────┐
+                      │    Launcher     │  │  Claude Code   │
+                      │    (Go)         │  │  (LLM + tools) │
+                      │                 │  │                │
+                      │ allocates PTY   │  │ calls MCP      │
+                      │ spawns client   │  │ tools on the   │
+                      │ streams I/O     │  │ Go backend     │
+                      │ detects idle    │  │ when needed    │
+                      └────────┬────────┘  └────────────────┘
+                               │ PTY master
+                      ┌────────▼────────┐
+                      │   Claude Code   │
+                      │  (child proc)   │
+                      │                 │
+                      │ reads from PTY  │
+                      │ writes to PTY   │
+                      │ (thinks it's    │
+                      │  talking to a   │
+                      │  human user)    │
+                      └─────────────────┘
 ```
 
-### The shim owns the loop
+### How it works
 
-The shim does NOT launch the `claude` CLI. It imports the Agent SDK directly and drives the agent loop programmatically. This means the shim controls when messages are sent to the LLM, when tools execute, and when the loop advances — the Go backend is the decision-maker, and the shim is the executor.
+1. The launcher allocates a PTY (pseudo-terminal) and spawns `claude` as a child process connected to it
+2. All terminal output from Claude Code (prompts, tool results, errors, ANSI escape codes) flows to the launcher
+3. The launcher streams this output to the Go backend over HTTP/WS
+4. The Go backend parses the byte stream to detect state (compiling, linting, testing, idle, error)
+5. When the backend decides to act, it tells the launcher to type keystrokes into the PTY:
+   - **Type a prompt:** `"fix the failing test in src/main.go"` — same as a user typing
+   - **Send Ctrl+C:** interrupt a runaway tool call — the client handles it natively
+   - **Send Ctrl+D or other control sequences** as needed
+6. The client processes input as if from a real user, and its output flows back through the same PTY
 
-Pseudocode for the shim's inner loop:
+### Idle Detection
 
-```
-for each message in agent_sdk.stream(prompt):
-    forward message to Go backend
-    decision = wait for backend response
-
-    if decision.action == "allow":
-        continue  // let the SDK execute tools normally
-
-    elif decision.action == "deny":
-        skip tool execution, return denial to LLM
-
-    elif decision.action == "inject":
-        agent_sdk.send_message(decision.prompt)
-        // LLM processes injected prompt, loop continues
-```
-
-### Event Flow (per turn)
+The launcher detects the client is idle (ready for input) using a **timeout**: after N milliseconds of no output from the PTY, it assumes the client is waiting. No parsing of client-specific prompt strings — this is what makes the approach client-agnostic.
 
 ```
-1. Agent SDK yields AssistantMessage
-   └── contains text blocks + tool call requests from LLM
-
-2. Shim intercepts, serializes, forwards to Go backend
-   POST /events { type: "tool_calls", tool_calls: [...] }
-
-3. Backend evaluates:
-   - checks enforcement rules (compile/lint/test gates)
-   - decides next action
-
-4. Backend responds with a decision:
-   { action: "allow" }
-   { action: "deny", reason: "..." }
-   { action: "inject", prompt: "fix the failing test..." }
-
-5a. ALLOW: shim lets the SDK execute tools normally,
-          then forwards tool results back to backend
-
-5b. DENY: shim skips execution, returns a fake tool
-          result with the denial reason to the LLM
-
-5c. INJECT: shim calls agent_sdk.send_message(injected_prompt),
-            which sends a synthetic user message into the stream.
-            The LLM processes it as a normal prompt.
-            The loop continues from step 1.
+PTY output stops ──> timer starts
+                    ──> timer fires (no output for N ms)
+                        ──> launcher signals "idle" to backend
+                            ──> backend decides next action
+PTY output resumes ──> timer resets
 ```
 
-### Prompt Injection Detail
+### Prompt Injection
 
-When the Go backend decides to inject a prompt (e.g., after a compile failure), it returns `{ action: "inject", prompt: "..." }`. The shim calls the Agent SDK's streaming input method, passing the prompt text as a new user message. The SDK treats this as if the user typed it — the LLM receives it, generates a response, and the loop resumes. This is the mechanism for "the server prompts the model to fix failures."
+To inject a prompt, the backend tells the launcher to type it into the PTY, followed by Enter. The client receives it as if the user typed it — the same way Claude Code processes any user message.
 
-### Wire Protocol (Shim ↔ Backend)
+```
+Backend → launcher:  { type: "type", text: "fix the compile error in main.go" }
+Launcher → PTY:      f  i  x     t  h  e     c  o  m  p  i  l  e  ...
+                      e  r  r  o  r     i  n     m  a  i  n  .  g  o  \n
+Claude Code sees:    "fix the compile error in main.go" (just like a user)
+```
 
-The shim and backend communicate over HTTP or WebSocket. The protocol is minimal:
+### Deny / Interrupt
 
-**Events (shim → backend):**
+To stop a tool call in progress (e.g., a runaway test suite), the backend tells the launcher to send Ctrl+C:
 
-| Event | When | Payload |
-|---|---|---|
-| `tool_calls` | LLM requests tool calls | `{ tool_calls: [{name, args}] }` |
-| `tool_results` | Tools finish executing | `{ tool_calls: [{name, result}] }` |
-| `text_response` | LLM produces text | `{ text: "..." }` |
-| `turn_end` | Turn completes | `{ turn_summary }` |
-| `session_start` | Session begins | `{ session_id }` |
-| `session_end` | Session ends | `{ session_id, reason }` |
-
-**Decisions (backend → shim):**
-
-| Action | Effect |
-|---|---|
-| `allow` | Let the current message through normally |
-| `deny` | Block tool execution, return denial to LLM |
-| `inject` | Send `prompt` into the SDK stream as a user message |
+```
+Backend → launcher:  { type: "ctrl_c" }
+Launcher → PTY:      Ctrl+C character
+Claude Code:         receives interrupt, cancels current tool, reports failure
+```
 
 ### Enforcement Gate Flow (Example)
 
 ```
-1. Claude calls Bash to run compile
-2. Shim forwards tool call to Go backend
-3. Backend: "allow, but flag for post-execution check"
-4. Tool executes, shim forwards result (compile failed)
-5. Backend: { action: "inject", prompt: "compile error in
-   src/main.go:23 — fix it before proceeding" }
-6. Shim injects prompt into the SDK stream
-7. LLM receives the prompt, reads the file, edits it
-8. Loop continues
+1. Launcher spawns Claude Code with prompt: "add feature X"
+2. Claude starts working — terminal output streams to backend
+3. Backend sees Claude call Bash to run `go build`
+4. Build output streams — backend parses it
+5. Build fails — terminal output stops
+6. Idle timeout fires — launcher signals idle
+7. Backend: "inject prompt: compile error, fix it and rerun"
+8. Launcher types the prompt into the PTY
+9. Claude receives it, reads the file, fixes the code, re-runs
+10. Loop continues until all gates pass
 ```
 
 ### Relationship with MCP
 
-The shim also configures a standard MCP connection from Claude Code to the Go backend. This is separate from the event stream: it is for **tool serving only**. The Go backend registers tools like `compile_project`, `run_lint`, `run_tests` as MCP tools. Claude can call these directly through the normal MCP flow, and their results arrive in the event stream like any other tool call.
+The Go backend also exposes a standard MCP server with enforcement tools (`compile_project`, `run_lint`, `run_tests`). When Claude Code needs to compile or lint, it can call these tools directly. Their output appears in the terminal just like any other tool call, and the backend sees it in the PTY stream.
 
 ```
 Two independent communication channels:
 
-1. Event stream (shim ↔ backend):
-   HTTP/WS, owns the loop, carries all events and decisions
+1. PTY I/O (launcher ↔ client process):
+   Carries all terminal output and keystrokes.
+   The backend drives the loop through this channel.
 
 2. MCP protocol (Claude Code LLM ↔ backend):
-   Standard MCP, carries tool invocations only
+   Standard MCP, carries tool invocations only.
+   Optional — enforcement can also work purely through PTY I/O.
 ```
 
 ## Deployment
 
-### The shim replaces the CLI
+### Launcher replaces the CLI
 
-The user never runs `claude` directly. The shim IS the entry point. Internally it imports the Agent SDK and drives the loop programmatically — no `claude` binary is involved.
+The user runs `loopai` (the launcher), not `claude` directly. The launcher spawns the real client as a child process inside a PTY.
 
-**Python shim:**
 ```
-pip install loopai-mcp      # or: uv tool install loopai-mcp
+go install github.com/romayengineer/loopai-mcp/launcher/...@latest
 loopai "build the auth module"
-```
-
-**TypeScript shim:**
-```
-npm install -g @loopai/mcp
-loopai "build the auth module"
+# internally: allocates PTY → spawns `claude` → streams I/O to backend
 ```
 
 ### Go backend is a separate binary
-
-The Go backend is installed and managed independently from the shim.
 
 ```
 go install github.com/romayengineer/loopai-mcp/backend/go/cmd/...@latest
@@ -428,15 +394,13 @@ loopai-backend
 
 ### How they connect
 
-The shim discovers the backend through configuration:
+The launcher discovers the backend through configuration:
 
 | Method | Config |
 |---|---|
 | Env var | `LOOPAI_BACKEND_URL=http://localhost:8090` |
 | CLI flag | `loopai --backend http://localhost:8090 "prompt"` |
 | Config file | `~/.config/loopai/config.toml` `[backend] url = "http://localhost:8090"` |
-
-The Go backend must be running before the shim starts. If unreachable, the shim fails fast with a connection error.
 
 ### Workflow
 
@@ -445,15 +409,18 @@ terminal 1 $ loopai-backend
              ← Go backend listening on :8090
 
 terminal 2 $ loopai "refactor the auth module"
-             ← shim connects to :8090
-             ← shim imports Agent SDK
-             ← shim owns the loop, forwards events to backend
-             ← backend makes decisions, injects prompts as needed
+             ← launcher allocates PTY
+             ← spawns `claude` inside PTY
+             ← streams terminal output to backend
+             ← backend makes decisions
+             ← launcher types prompts / sends Ctrl+C as instructed
 ```
 
-### Why two separate installs
+### Why the launcher and backend are separate
 
-| Component | Language | Update cadence | Runs where |
+| Component | Language | Runs where | Responsibility |
 |---|---|---|---|
-| Shim | Python (or TS) | Matches Agent SDK releases | Developer machine, as CLI |
-| Backend | Go | Independent | Developer machine, CI, server |
+| Launcher | Go | Developer machine, CI | PTY lifecycle, I/O streaming, idle detection |
+| Backend | Go | Developer machine, CI, server | Decision-making, enforcement, state machine |
+
+Same language (Go) for both. The backends's language is the launcher's language — no cross-language dependency.

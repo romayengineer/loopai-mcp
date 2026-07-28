@@ -2,11 +2,28 @@
 
 ## Architecture
 
-- **Client shim** (`client/python/`, `client/typescript/`) sends all events to the Go backend: file edits, file reads, command execution, processing, idle, stop states.
-- **Go server** (`backend/go/`) is the brain — receives events, decides whether to inject a prompt, let execution continue, or take other actions. Controls the agent lifecycle.
-- **Client-agnostic via MCP.** The protocol layer is abstract; both Claude Code and OpenCode use the same event schema. Adding a new client means writing a new shim in the best language for it.
+### Terminal I/O Control (not SDK)
 
-## Hard rule enforcement loop
+LoopAI-MCP controls any TUI-based agent client through its **terminal I/O** — the same interface a human user would use. No client SDK is imported, no plugin system is targeted, no vendor lock-in exists.
+
+- **Launcher** (`launcher/`) allocates a PTY, spawns any TUI agent client (Claude Code, OpenCode, etc.) inside it, streams terminal output to the Go backend, and writes keystrokes received from the backend into the PTY. The client does not know it is being driven programmatically.
+- **Go backend** (`backend/go/`) is the brain — reads the terminal output byte stream, detects idle via output timeout, decides when to type prompts or send control sequences (Ctrl+C, etc.), and drives the enforcement loop entirely through I/O.
+- **Client-agnostic.** One launcher works with every terminal-based AI coding agent. No Python shim vs TypeScript shim — the launcher is a single binary that talks PTY.
+
+### Why PTY I/O over client SDKs
+
+| Criteria | PTY I/O (this approach) | Per-client SDK |
+|---|---|---|
+| Client support | Any TUI agent: Claude Code, OpenCode, Continue, Aider, any future tool | One implementation per client, each using a different SDK or plugin API |
+| Launcher code | One binary, same language as backend (Go) | N implementations in N languages (Python, TS, etc.) |
+| Version coupling | None — the client can update freely | Every SDK version change may break the shim |
+| Loop control | Absolute — launcher sees every byte, sends every keystroke | SDK-dependent, limited by what the SDK exposes |
+| Prompt injection | Type the prompt into the terminal — identical to a user | SDK-specific APIs, may not exist for all clients |
+| Deny/interrupt | Send Ctrl+C — the client handles it natively | Requires SDK support for aborting tool calls |
+| Observability | See everything the user would see in the terminal | Limited to what the SDK's event stream exposes |
+| Long-term maintenance | Client changes don't affect the launcher | Each client update may require shim changes |
+
+### Hard rule enforcement loop
 
 The server enforces this sequence on every change:
 
@@ -18,7 +35,7 @@ If any step fails, the server prompts the model to fix it before proceeding. The
 
 | Layer | Responsibility |
 |---|---|
-| Server logic | Prompt-based enforcement, decides next action |
+| Server logic | Reads terminal output, types prompts, drives enforcement |
 | Pre-commit | Catches issues locally before commit |
 | CI | Final gate, mirrors server enforcement |
 
@@ -26,27 +43,29 @@ If any step fails, the server prompts the model to fix it before proceeding. The
 
 | Directory | Language | Role |
 |---|---|---|
-| `backend/go/` | Go | Core server — event processing, prompt injection, enforcement |
-| `client/python/` | Python | Python MCP shim |
-| `client/typescript/` | TypeScript | TypeScript/JS MCP shim |
+| `backend/go/` | Go | Core server — reads terminal output, decides actions, drives enforcement |
+| `launcher/` | Go | PTY lifecycle, client process management, terminal I/O streaming, idle detection |
 
 ## Commands
 
 Root-level `make` (or `task`) orchestrates all sub-projects. As tooling is chosen, fill in exact commands per package below.
 
 - **Backend:** `go build ./backend/go/...`, `go test ./backend/go/...`
-- **Python:** `[ruff/pytest/poetry/uv — TBD]`
-- **TypeScript:** `[eslint/vitest/npm/pnpm — TBD]`
+- **Launcher:** `go build ./launcher/...`
+- **Backend service:** `loopai-backend` (starts on `:8090`)
+- **Launcher:** `loopai` (spawns client, streams I/O to backend)
 
 ## Conventions
 
 - Always run the full enforcement gate (**compile → lint → test**) before considering a task done. The server will re-prompt if you skip it.
 - When adding new enforcement rules, add them in all three places: server logic, pre-commit hook, CI workflow.
-- MCP protocol definitions live in a shared location referenced by both client shims and the server.
+- The launcher must never import a client SDK or plugin package. It speaks PTY I/O only.
+- Idle detection is timeout-based (N ms with no output). No client-specific prompt string parsing.
+- The Go backend and launcher communicate over HTTP/WebSocket. Protocol definitions live in a shared package.
 
 ## Open items
 
-- Exact Go/TS/Python toolchain choices
-- Pre-commit framework
+- Exact terminal output state machine design
+- PTY library choice for Go
+- Timeout value and idle detection strategy
 - CI provider and workflow shape
-- Event schema / protocol spec
