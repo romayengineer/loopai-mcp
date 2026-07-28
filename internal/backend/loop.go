@@ -4,15 +4,31 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
-	"os"
 
 	"github.com/romayengineer/loopai-mcp/internal/proto"
 )
 
-const defaultIdlePrompt = "list the directory contents"
+const (
+	promptCompileFail = "The last compile attempt failed. Fix the errors above and re-run the build."
+	promptLintFail    = "The last lint check found issues. Fix them and re-run the linter."
+	promptTestFail    = "The last test run had failures. Fix them and re-run the tests."
+)
+
+type Gate struct {
+	output      *OutputBuffer
+	pendingLint bool
+	pendingTest bool
+}
+
+func NewGate() *Gate {
+	return &Gate{
+		output: NewOutputBuffer(),
+	}
+}
 
 func HandleLauncher(ctx context.Context, pc *proto.Conn) {
 	defer pc.Close()
+	gate := NewGate()
 
 	for {
 		select {
@@ -34,18 +50,10 @@ func HandleLauncher(ctx context.Context, pc *proto.Conn) {
 				slog.Warn("bad output payload", "error", err)
 				continue
 			}
-			if _, err := os.Stdout.Write(p.Data); err != nil {
-				slog.Error("write output", "error", err)
-			}
+			gate.handleOutput(p.Data)
 
 		case proto.MsgIdle:
-			slog.Info("client idle, sending prompt")
-			if err := pc.Send(proto.NewMessage(proto.MsgType, proto.TypePayload{
-				Text: defaultIdlePrompt,
-			})); err != nil {
-				slog.Warn("send idle prompt failed", "error", err)
-				return
-			}
+			gate.handleIdle(pc)
 
 		case proto.MsgExited:
 			var p proto.ExitedPayload
@@ -67,5 +75,71 @@ func HandleLauncher(ctx context.Context, pc *proto.Conn) {
 		default:
 			slog.Warn("unknown message", "type", msg.Type)
 		}
+	}
+}
+
+func (g *Gate) handleOutput(data []byte) {
+	g.output.Write(data)
+}
+
+func (g *Gate) handleIdle(pc *proto.Conn) {
+	result := g.output.Analyze()
+	phase := result.Phase
+	res := result.Result
+	g.output.Reset()
+
+	// For compile and lint, unknown result with a triggered phase means
+	// the tool produced no output = success (go build / golangci-lint print
+	// nothing on success, only on failure).
+	if (phase == PhaseCompile || phase == PhaseLint) && res == ResultUnknown {
+		res = ResultSuccess
+	}
+
+	slog.Debug("idle analysis",
+		"phase", phase,
+		"result", res,
+	)
+
+	send := func(text string) {
+		if err := pc.Send(proto.NewMessage(proto.MsgType, proto.TypePayload{
+			Text: text,
+		})); err != nil {
+			slog.Warn("send failed", "error", err)
+		}
+	}
+
+	switch phase {
+	case PhaseCompile:
+		switch res {
+		case ResultSuccess:
+			slog.Info("compile passed, next: lint")
+			send("Build succeeded. Now run the linter (golangci-lint run ./...).")
+		case ResultFailure:
+			slog.Info("compile failed, prompting fix")
+			send(promptCompileFail)
+		}
+
+	case PhaseLint:
+		switch res {
+		case ResultSuccess:
+			slog.Info("lint passed, next: test")
+			send("Linting passed. Now run the tests (go test ./...).")
+		case ResultFailure:
+			slog.Info("lint failed, prompting fix")
+			send(promptLintFail)
+		}
+
+	case PhaseTest:
+		switch res {
+		case ResultSuccess:
+			slog.Info("all gates passed")
+			send("All checks passed. The task is complete.")
+		case ResultFailure:
+			slog.Info("tests failed, prompting fix")
+			send(promptTestFail)
+		}
+
+	case PhaseUnknown:
+		slog.Debug("no phase detected on idle, no action")
 	}
 }

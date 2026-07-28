@@ -7,7 +7,7 @@
 LoopAI-MCP controls any TUI-based agent client through its **terminal I/O** — the same interface a human user would use. No client SDK is imported, no plugin system is targeted, no vendor lock-in exists.
 
 - **Launcher** (`launcher/`) allocates a PTY, spawns any TUI agent client (Claude Code, OpenCode, etc.) inside it, streams terminal output to the Go backend, and writes keystrokes received from the backend into the PTY. The client does not know it is being driven programmatically.
-- **Go backend** (`backend/go/`) is the brain — reads the terminal output byte stream, detects idle via output timeout, decides when to type prompts or send control sequences (Ctrl+C, etc.), and drives the enforcement loop entirely through I/O.
+- **Go backend** (`internal/backend/`) is the brain — reads the terminal output byte stream, detects idle via output timeout, decides when to type prompts or send control sequences (Ctrl+C, etc.), and drives the enforcement loop entirely through I/O.
 - **Client-agnostic.** One launcher works with every terminal-based AI coding agent. No Python shim vs TypeScript shim — the launcher is a single binary that talks PTY.
 
 ### Why PTY I/O over client SDKs
@@ -33,9 +33,33 @@ compile → lint → test
 
 If any step fails, the server prompts the model to fix it before proceeding. The same gates must run in **pre-commit hooks** and **CI** — always add enforcement in all three places.
 
+**How it works:**
+
+1. The backend buffers all terminal output between idle events
+2. Each output chunk is scanned for **phase triggers** (`go build`, `go test`, `golangci-lint` patterns)
+3. On idle (no output for N ms), the buffered output is analyzed against **Go error/success regex patterns**
+4. Compile/lint success is inferred from the absence of error patterns in the output (tools print nothing on success)
+5. Test success is detected by the `ok  package  time` summary line
+
+```
+Output arrives ──> detect phase trigger (compile/lint/test)
+Idle fires    ──> analyze buffered output:
+                    └── compile? → errors? → inject fix prompt
+                    └── compile? → no errors? → advance to lint
+                    └── lint? → errors? → inject fix prompt
+                    └── lint? → no errors? → advance to test
+                    └── test? → failures? → inject fix prompt
+                    └── test? → passed? → all DONE
+                    └── unknown? → no action
+```
+
+**Prompt injection** uses the same mechanism as all other input: the backend sends a `MsgType` to the launcher, which types the prompt text into the PTY. The client sees it as if the user typed it.
+
+**Pattern library** (`internal/backend/phase.go`): currently supports Go tools (`go build`, `go test`, `go vet`, `golangci-lint`). Extensible per-language via config later.
+
 | Layer | Responsibility |
 |---|---|
-| Server logic | Reads terminal output, types prompts, drives enforcement |
+| Server logic (`loop.go`) | Phase detection, output analysis, gate transitions, prompt injection |
 | Pre-commit | Catches issues locally before commit |
 | CI | Final gate, mirrors server enforcement |
 
@@ -55,8 +79,10 @@ Root-level `make` (or `task`) orchestrates all sub-projects. Fill in exact comma
 
 - **Build all:** `go build ./cmd/...`
 - **Test all:** `go test ./internal/...`
-- **Test single pkg:** `go test ./internal/launcher/`
+- **Test single pkg:** `go test ./internal/backend/`
 - **Test integration:** `go test -tags=integration ./internal/...` (runs real I/O, no mocks)
+- **Backend unit tests:** `go test ./internal/backend/ -count=1 -timeout 10s` (phase detection, output buffer, no external deps)
+- **Backend integration tests:** `go test -tags=integration ./internal/backend/ -count=1 -timeout 30s` (full enforcement loop end-to-end)
 - **Backend:** `loopai-backend` (starts on Unix socket at `~/.config/loopai/loopai.sock`)
 - **Launcher:** `loopai -client claude "prompt"` (spawns client, streams I/O to backend)
 
@@ -88,7 +114,7 @@ Root-level `make` (or `task`) orchestrates all sub-projects. Fill in exact comma
 
 ## Open items
 
-- Exact terminal output state machine design
-- PTY library choice for Go
-- Timeout value and idle detection strategy
-- CI provider and workflow shape
+- Additional language support (JS/TS/Python/Rust patterns for phase detection)
+- Idle timeout tuning for real-world usage
+- Multi-client support testing (OpenCode, Aider, etc.)
+- Windows ConPTY support
