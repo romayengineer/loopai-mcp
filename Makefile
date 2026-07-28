@@ -10,6 +10,7 @@ test-unit:
 
 test-integration:
 	go test -tags=integration ./internal/... -count=1 -timeout 30s
+	go test -tags=integration ./cmd/... -count=1 -timeout 120s
 
 test-all: test-unit test-integration
 

@@ -73,6 +73,7 @@ func main() {
 
 	if exitCode != 0 {
 		fmt.Fprintf(os.Stderr, "client exited with code %d\n", exitCode)
+		os.Exit(exitCode)
 	}
 }
 
