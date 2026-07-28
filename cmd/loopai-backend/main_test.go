@@ -131,6 +131,46 @@ func TestPidStopNoPidFile(t *testing.T) {
 	}
 }
 
+func TestBackendStartStopIntegration(t *testing.T) {
+	binary := "../bin/loopai-backend"
+	if _, err := os.Stat(binary); err != nil {
+		t.Skip("binary not found, run 'make build' first")
+	}
+
+	dir := socketDir(t, "stopint")
+	sp := filepath.Join(dir, "loopai.sock")
+	pidPath := filepath.Join(dir, "loopai.pid")
+
+	// Start the backend binary
+	cmd := exec.Command(binary, "-socket", sp)
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start backend: %v", err)
+	}
+	defer cmd.Process.Kill()
+
+	time.Sleep(300 * time.Millisecond)
+
+	// Run stop subcommand
+	output, err := exec.Command(binary, "-socket", sp, "stop").CombinedOutput()
+	if err != nil {
+		t.Fatalf("stop failed: %v\n%s", err, output)
+	}
+
+	// Wait for process to exit
+	done := make(chan struct{})
+	go func() { cmd.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout waiting for backend to shut down")
+	}
+
+	// Verify pid file was removed
+	if _, err := os.Stat(pidPath); !os.IsNotExist(err) {
+		t.Fatalf("pid file still exists: %v", err)
+	}
+}
+
 func TestBackendBinaryStartsAndAcceptsConnection(t *testing.T) {
 	sp := socketPath(t, "backend.sock")
 
