@@ -12,6 +12,19 @@ fi
 echo "--- go vet ---"
 go vet ./internal/... ./cmd/...
 
+GOLANGCI_LINT=""
+if command -v golangci-lint >/dev/null 2>&1; then
+	GOLANGCI_LINT="golangci-lint"
+elif [ -f "$HOME/go/bin/golangci-lint" ]; then
+	GOLANGCI_LINT="$HOME/go/bin/golangci-lint"
+fi
+if [ -n "$GOLANGCI_LINT" ]; then
+	echo "--- golangci-lint ---"
+	"$GOLANGCI_LINT" run ./...
+else
+	echo "--- golangci-lint: not installed, skipping ---"
+fi
+
 echo "--- unit tests ---"
 go test ./internal/... -count=1 -timeout 30s
 

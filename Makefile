@@ -1,6 +1,6 @@
-.PHONY: all build test-unit test-integration test-all test fmt vet install-hooks clean
+.PHONY: all build test-unit test-integration test-all test fmt vet lint install-hooks clean
 
-all: build test-all
+all: build lint test-all
 
 build:
 	go build ./cmd/...
@@ -11,6 +11,15 @@ fmt:
 
 vet:
 	go vet ./internal/... ./cmd/...
+
+lint:
+	@if command -v golangci-lint >/dev/null 2>&1; then \
+		golangci-lint run ./...; \
+	elif [ -f "$$HOME/go/bin/golangci-lint" ]; then \
+		$$HOME/go/bin/golangci-lint run ./...; \
+	else \
+		echo "golangci-lint not installed, skipping"; \
+	fi
 
 test-unit:
 	go test -race ./internal/... -count=1 -timeout 30s
