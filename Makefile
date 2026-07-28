@@ -3,12 +3,16 @@ GOLANGCI_LINT := $(shell go env GOPATH)/bin/golangci-lint
 
 .PHONY: all build test-unit test-integration test-all test cover fmt vet lint install-lint install-hooks clean
 
+BUILD_DIR := bin
+
 all: build lint test-all
 
 build:
-	go build -o loopai ./cmd/loopai
-	go build -o loopai-backend ./cmd/loopai-backend
-	go build -o loopai-capture ./cmd/loopai-capture
+	@mkdir -p $(BUILD_DIR)
+	go build -o $(BUILD_DIR)/loopai ./cmd/loopai
+	go build -o $(BUILD_DIR)/loopai-backend ./cmd/loopai-backend
+	go build -o $(BUILD_DIR)/loopai-capture ./cmd/loopai-capture
+	@echo "Binaries in $(BUILD_DIR)/"
 
 fmt:
 	gofmt -s -l .
@@ -64,5 +68,5 @@ install-hooks:
 	git config core.hooksPath .githooks
 
 clean:
-	rm -f loopai loopai-backend
+	rm -rf $(BUILD_DIR)
 	go clean ./cmd/...

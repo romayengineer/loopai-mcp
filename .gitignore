@@ -4,10 +4,8 @@
 *.out
 *.prof
 
-# Project binaries
-/loopai
-/loopai-backend
-/loopai-capture
+# Build output
+/bin/
 
 # Data files
 *.raw
