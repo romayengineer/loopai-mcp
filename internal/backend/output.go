@@ -18,7 +18,8 @@ func NewOutputBuffer() *OutputBuffer {
 func (b *OutputBuffer) Write(data []byte) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.buf.Write(data)
+	clean := StripANSI(data)
+	b.buf.Write(clean)
 
 	if p := detectPhaseTrigger(string(data)); p != PhaseUnknown {
 		b.phase = p
