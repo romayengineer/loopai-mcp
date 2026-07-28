@@ -1,4 +1,7 @@
-.PHONY: all build test-unit test-integration test-all test cover fmt vet lint install-hooks clean
+GOLANGCI_LINT_VERSION := v2.12.2
+GOLANGCI_LINT := $(shell go env GOPATH)/bin/golangci-lint
+
+.PHONY: all build test-unit test-integration test-all test cover fmt vet lint install-lint install-hooks clean
 
 all: build lint test-all
 
@@ -12,13 +15,26 @@ fmt:
 vet:
 	go vet ./internal/... ./cmd/...
 
+install-lint:
+	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+	@echo "Installed golangci-lint $(GOLANGCI_LINT_VERSION)"
+
 lint:
-	@if command -v golangci-lint >/dev/null 2>&1; then \
+	@if [ -x "$(GOLANGCI_LINT)" ]; then \
+		actual=$$("$(GOLANGCI_LINT)" version 2>/dev/null | head -1); \
+		if ! echo "$$actual" | grep -qE "v?2\.12\.2"; then \
+			echo "WARNING: expected golangci-lint $(GOLANGCI_LINT_VERSION), got: $$actual"; \
+			echo "  Run 'make install-lint' to install the pinned version matching CI."; \
+		fi; \
+		"$(GOLANGCI_LINT)" run ./...; \
+	elif command -v golangci-lint >/dev/null 2>&1; then \
+		actual=$$(golangci-lint version 2>/dev/null | head -1); \
+		echo "WARNING: using golangci-lint from PATH (not GOBIN). Version: $$actual"; \
+		echo "  Run 'make install-lint' to install the pinned version matching CI."; \
 		golangci-lint run ./...; \
-	elif [ -f "$$HOME/go/bin/golangci-lint" ]; then \
-		$$HOME/go/bin/golangci-lint run ./...; \
 	else \
-		echo "golangci-lint not installed, skipping"; \
+		echo "golangci-lint not found. Run 'make install-lint' first."; \
+		exit 1; \
 	fi
 
 test-unit:

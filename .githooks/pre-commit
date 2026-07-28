@@ -12,17 +12,25 @@ fi
 echo "--- go vet ---"
 go vet ./internal/... ./cmd/...
 
+PINNED_LINT_VERSION="v2.12.2"
+GOBIN_LINT="$HOME/go/bin/golangci-lint"
 GOLANGCI_LINT=""
-if command -v golangci-lint >/dev/null 2>&1; then
+if [ -x "$GOBIN_LINT" ]; then
+	GOLANGCI_LINT="$GOBIN_LINT"
+elif command -v golangci-lint >/dev/null 2>&1; then
 	GOLANGCI_LINT="golangci-lint"
-elif [ -f "$HOME/go/bin/golangci-lint" ]; then
-	GOLANGCI_LINT="$HOME/go/bin/golangci-lint"
 fi
 if [ -n "$GOLANGCI_LINT" ]; then
+	actual=$("$GOLANGCI_LINT" version 2>/dev/null | head -1)
+	if ! echo "$actual" | grep -qE "v?2\.12\.2"; then
+		echo "WARNING: expected golangci-lint $PINNED_LINT_VERSION, got: $actual"
+		echo "  Run 'make install-lint' to install the pinned version matching CI."
+	fi
 	echo "--- golangci-lint ---"
 	"$GOLANGCI_LINT" run ./...
 else
 	echo "--- golangci-lint: not installed, skipping ---"
+	echo "  Run 'make install-lint' to install the pinned version matching CI."
 fi
 
 echo "--- unit tests ---"
