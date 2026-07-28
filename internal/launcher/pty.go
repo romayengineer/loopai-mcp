@@ -4,7 +4,9 @@
 package launcher
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -101,7 +103,13 @@ func (p *PtyProcess) Write(data []byte) (int, error) {
 }
 
 func (p *PtyProcess) Read(buf []byte) (int, error) {
-	return p.PTY.Read(buf)
+	n, err := p.PTY.Read(buf)
+	if err != nil {
+		if errors.Is(err, syscall.EIO) {
+			return n, io.EOF
+		}
+	}
+	return n, err
 }
 
 func (p *PtyProcess) Signal(sig os.Signal) error {

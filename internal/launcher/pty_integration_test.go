@@ -24,7 +24,7 @@ func TestSpawnEchoAndReadOutput(t *testing.T) {
 	}()
 
 	var buf bytes.Buffer
-	_, err = io.Copy(&buf, proc.PTY)
+	_, err = io.Copy(&buf, proc)
 	if err != nil && err != io.EOF {
 		t.Fatalf("read PTY: %v", err)
 	}
@@ -55,7 +55,7 @@ func TestSpawnEchoAndWaitExitCode(t *testing.T) {
 	}
 	defer proc.Close()
 
-	io.Copy(io.Discard, proc.PTY)
+	io.Copy(io.Discard, proc)
 	<-proc.Wait()
 
 	code := proc.ExitCode()
@@ -76,7 +76,7 @@ func TestSpawnWriteToPTY(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	_, err = io.Copy(&buf, proc.PTY)
+	_, err = io.Copy(&buf, proc)
 	if err != nil && err != io.EOF {
 		t.Fatalf("read PTY: %v", err)
 	}
