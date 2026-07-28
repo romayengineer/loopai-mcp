@@ -23,6 +23,7 @@ func main() {
 	idleTimeout := flag.Duration("idle", defaultIdleTimeout, "idle timeout before signaling backend")
 	passthrough := flag.Bool("passthrough", false, "show PTY output on terminal")
 	interactive := flag.Bool("interactive", false, "interactive mode: stdin -> PTY, PTY -> terminal (implies -passthrough)")
+	filterCSIEnabled := flag.Bool("filter-csi", false, "strip CSI escape sequences from stdin (arrows, F-keys, etc.)")
 	flag.Parse()
 
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
@@ -108,12 +109,21 @@ func main() {
 			}
 		}
 
-		go func() {
-			written, err := filterCSI(proc, os.Stdin)
-			if err != nil {
-				slog.Warn("stdin filter", "written", written, "error", err)
-			}
-		}()
+		if *filterCSIEnabled {
+			go func() {
+				written, err := filterCSI(proc, os.Stdin)
+				if err != nil {
+					slog.Warn("stdin filter", "written", written, "error", err)
+				}
+			}()
+		} else {
+			go func() {
+				written, err := io.Copy(proc, os.Stdin)
+				if err != nil {
+					slog.Warn("stdin copy", "written", written, "error", err)
+				}
+			}()
+		}
 	}
 
 	// Wrap the PTY reader with optional passthrough to terminal
