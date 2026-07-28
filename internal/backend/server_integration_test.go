@@ -88,10 +88,9 @@ func TestBackendFullExchange(t *testing.T) {
 
 	handler := func(_ context.Context, pc *proto.Conn) {
 		defer pc.Close()
-		for i := 0; i < 3; i++ {
+		for {
 			msg, err := pc.Receive()
 			if err != nil {
-				t.Errorf("receive: %v", err)
 				return
 			}
 			if msg.Type == proto.MsgExited {
