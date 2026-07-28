@@ -1,7 +1,6 @@
 package backend
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"log/slog"
@@ -56,19 +55,8 @@ func runTool(name, dir string, args []string, timeout time.Duration) ToolResult 
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
 
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	err := cmd.Run()
-
-	combined := stdout.String()
-	if stderr.Len() > 0 {
-		if len(combined) > 0 {
-			combined += "\n"
-		}
-		combined += stderr.String()
-	}
+	output, err := cmd.CombinedOutput()
+	combined := string(output)
 
 	// Truncate output to MaxToolOutput
 	if len(combined) > MaxToolOutput {
