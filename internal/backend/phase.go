@@ -91,6 +91,7 @@ var phaseTriggers = []struct {
 	{Phase: PhaseCompile, Regexp: regexp.MustCompile(`(?m)\bgo build\b`)},
 	{Phase: PhaseCompile, Regexp: regexp.MustCompile(`(?m)\bgo install\b`)},
 	{Phase: PhaseCompile, Regexp: regexp.MustCompile(`(?m)\bgo vet\b`)},
+	{Phase: PhaseCompile, Regexp: regexp.MustCompile(`(?m)\bgo mod\b`)},
 	{Phase: PhaseLint, Regexp: regexp.MustCompile(`(?m)\bgolangci-lint\b`)},
 	{Phase: PhaseLint, Regexp: regexp.MustCompile(`(?m)\blint\b`)},
 	{Phase: PhaseTest, Regexp: regexp.MustCompile(`(?m)\bgo test\b`)},

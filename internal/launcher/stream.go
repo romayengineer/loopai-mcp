@@ -36,13 +36,13 @@ type PtyWriter interface {
 
 // PipePTYToBackend reads PTY output and forwards it to the backend
 // over the Unix socket. Idle is reset on each chunk of output.
+// The context is checked before every Read to ensure prompt shutdown.
 func PipePTYToBackend(ctx context.Context, sender MessageSender, r io.Reader, resetter Resetter) error {
 	buf := make([]byte, readBufSize)
 	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
+		// Check context before blocking on Read.
+		if err := ctx.Err(); err != nil {
+			return err
 		}
 
 		n, err := r.Read(buf)

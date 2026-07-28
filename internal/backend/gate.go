@@ -22,13 +22,19 @@ type Gate struct {
 	output         OutputAnalyzer
 	prompts        PromptRenderer
 	lastIdlePrompt time.Time
+	lastSend       map[string]time.Time // per-prompt-name cooldown
 }
+
+// promptCooldown is the minimum interval between sending the same prompt
+// name. Prevents rapid-fire prompt injection when idle fires frequently.
+const promptCooldown = 5 * time.Second
 
 // NewGate creates a Gate with the given output analyzer and prompt renderer.
 func NewGate(analyzer OutputAnalyzer, prompts PromptRenderer) *Gate {
 	return &Gate{
-		output:  analyzer,
-		prompts: prompts,
+		output:   analyzer,
+		prompts:  prompts,
+		lastSend: make(map[string]time.Time),
 	}
 }
 
@@ -64,6 +70,14 @@ func (g *Gate) handleIdle(ctx context.Context, conn LauncherConn) {
 	)
 
 	send := func(name string) {
+		// Per-prompt cooldown: skip if we sent the same prompt recently.
+		// Prevents rapid-fire prompt injection when idle fires frequently.
+		if last, ok := g.lastSend[name]; ok && time.Since(last) < promptCooldown {
+			slog.Debug("prompt suppressed by cooldown", "name", name, "since", time.Since(last))
+			return
+		}
+		g.lastSend[name] = time.Now()
+
 		text := g.prompts.Render(name, vars)
 		slog.Debug("sending prompt", "name", name, "length", len(text))
 		msg, mErr := proto.NewMessage(proto.MsgType, proto.TypePayload{

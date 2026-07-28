@@ -4,6 +4,7 @@
 package launcher
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -56,12 +57,23 @@ type PtyProcess struct {
 // Spawn starts a client binary inside a PTY and returns a Process
 // that can be used to interact with it.
 func Spawn(client string, args []string) (Process, error) {
+	return spawn(context.Background(), client, args)
+}
+
+// SpawnContext starts a client binary inside a PTY with context support.
+// The context can be used to cancel the launch. If the context is cancelled
+// before the process starts, the PTY is cleaned up.
+func SpawnContext(ctx context.Context, client string, args []string) (Process, error) {
+	return spawn(ctx, client, args)
+}
+
+func spawn(ctx context.Context, client string, args []string) (Process, error) {
 	binary, err := exec.LookPath(client)
 	if err != nil {
 		return nil, fmt.Errorf("client %q not found on PATH: %w", client, err)
 	}
 
-	cmd := exec.Command(binary, args...)
+	cmd := exec.CommandContext(ctx, binary, args...)
 	cmd.Env = append(os.Environ(), TermEnv)
 
 	ptym, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: DefaultRows, Cols: DefaultCols})
@@ -98,7 +110,7 @@ func Spawn(client string, args []string) (Process, error) {
 		close(p.done)
 	}()
 
-	go forwardSignals(cmd, p.done)
+	go forwardSignals(ctx, cmd, p.done)
 
 	slog.Info("client spawned", "client", client, "pid", p.PID())
 	return p, nil
@@ -106,8 +118,9 @@ func Spawn(client string, args []string) (Process, error) {
 
 // forwardSignals forwards signals from the parent process to the child process.
 // It handles multiple sequential signals (SIGINT, SIGTERM, SIGHUP) by looping
-// until the process exits. Accepts optional pre-configured signal channel for testing.
-func forwardSignals(cmd *exec.Cmd, done <-chan struct{}, sigCh ...chan os.Signal) {
+// until the process exits, the context is cancelled, or the done channel closes.
+// Accepts optional pre-configured signal channel for testing.
+func forwardSignals(ctx context.Context, cmd *exec.Cmd, done <-chan struct{}, sigCh ...chan os.Signal) {
 	ch := make(chan os.Signal, 1)
 	if len(sigCh) > 0 && sigCh[0] != nil {
 		ch = sigCh[0]
@@ -129,6 +142,9 @@ func forwardSignals(cmd *exec.Cmd, done <-chan struct{}, sigCh ...chan os.Signal
 			}
 		case <-done:
 			slog.Debug("process exited, stopping signal handler")
+			return
+		case <-ctx.Done():
+			slog.Debug("context cancelled, stopping signal handler")
 			return
 		}
 	}

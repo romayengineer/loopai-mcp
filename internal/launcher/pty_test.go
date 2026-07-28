@@ -1,6 +1,7 @@
 package launcher
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -118,7 +119,7 @@ func TestForwardSignalsHandlesMultipleSignals(t *testing.T) {
 	sigCh := make(chan os.Signal, 10)
 
 	// Run signal handler with test signal channel
-	go forwardSignals(cmd, done, sigCh)
+	go forwardSignals(context.Background(), cmd, done, sigCh)
 
 	// Send multiple signals
 	sigCh <- os.Interrupt
@@ -156,7 +157,7 @@ func TestForwardSignalsExitsOnDoneChannel(t *testing.T) {
 
 	exited := make(chan struct{})
 	go func() {
-		forwardSignals(cmd, done, sigCh)
+		forwardSignals(context.Background(), cmd, done, sigCh)
 		close(exited)
 	}()
 

@@ -134,10 +134,10 @@ func TestIdleDetectorStartRace(t *testing.T) {
 // concurrently with Stop(). The callback must be resilient to this race.
 func TestIdleDetectorFireStopRace(t *testing.T) {
 	var (
-		mu           sync.Mutex
-		callCount    int
-		afterStop    int // count of calls after Stop() was requested
-		stopped      bool
+		mu        sync.Mutex
+		callCount int
+		afterStop int // count of calls after Stop() was requested
+		stopped   bool
 	)
 	detector := NewIdleDetector(1*time.Millisecond, func() {
 		mu.Lock()

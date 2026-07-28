@@ -4,6 +4,7 @@ package launcher
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -208,7 +209,7 @@ func TestForwardSignalsDonePath(t *testing.T) {
 	done := make(chan struct{})
 	sigCh := make(chan os.Signal, 1)
 
-	go forwardSignals(cmd, done, sigCh)
+	go forwardSignals(context.Background(), cmd, done, sigCh)
 
 	// Close done first, then send. The done path should be taken.
 	close(done)
@@ -233,7 +234,7 @@ func TestForwardSignalsSignalPath(t *testing.T) {
 	done := make(chan struct{})
 	sigCh := make(chan os.Signal, 1)
 
-	go forwardSignals(cmd, done, sigCh)
+	go forwardSignals(context.Background(), cmd, done, sigCh)
 
 	// Give the shell time to install the trap before we send the signal
 	time.Sleep(50 * time.Millisecond)

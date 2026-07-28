@@ -66,6 +66,24 @@ func TestDetectPhaseTriggerGoTest(t *testing.T) {
 	}
 }
 
+func TestDetectPhaseTriggerGoModTidy(t *testing.T) {
+	if p := detectPhaseTrigger("> go mod tidy\n"); p != PhaseCompile {
+		t.Fatalf("expected PhaseCompile for go mod tidy, got %s", p)
+	}
+}
+
+func TestDetectPhaseTriggerGoModDownload(t *testing.T) {
+	if p := detectPhaseTrigger("> go mod download\n"); p != PhaseCompile {
+		t.Fatalf("expected PhaseCompile for go mod download, got %s", p)
+	}
+}
+
+func TestDetectPhaseTriggerGoModVerify(t *testing.T) {
+	if p := detectPhaseTrigger("> go mod verify\n"); p != PhaseCompile {
+		t.Fatalf("expected PhaseCompile for go mod verify, got %s", p)
+	}
+}
+
 func TestDetectPhaseTriggerGolangciLint(t *testing.T) {
 	if p := detectPhaseTrigger("> golangci-lint run ./...\n"); p != PhaseLint {
 		t.Fatalf("expected PhaseLint, got %s", p)

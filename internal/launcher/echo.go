@@ -19,6 +19,10 @@ import (
 // terminal emulator on the user's side already echoes what the user types.
 // Disabling ECHO on the PTY eliminates the double-echo and the raw escape
 // artifacts while still letting the client receive all keystrokes normally.
+//
+// This is Linux-specific: uses TIOCGPTN ioctl to get the PTY number
+// and constructs /dev/pts/N. On other Unix systems the slave path
+// convention differs (e.g. /dev/ttysNNN on macOS).
 func DisablePTYEcho(ptm *os.File) error {
 	n, err := unix.IoctlGetInt(int(ptm.Fd()), unix.TIOCGPTN)
 	if err != nil {

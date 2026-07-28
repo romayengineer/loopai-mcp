@@ -187,13 +187,28 @@ func TestAnalyzeGoLintError(t *testing.T) {
 	}
 }
 
-func TestOutputBufferKeepsLatestPhase(t *testing.T) {
+func TestOutputBufferKeepsFirstPhase(t *testing.T) {
 	buf := NewOutputBuffer()
 	buf.Write([]byte("> go build"))
 	buf.Write([]byte("normal text"))
 	buf.Write([]byte("> go test"))
+	if p := buf.CurrentPhase(); p != PhaseCompile {
+		t.Fatalf("expected PhaseCompile (first trigger), got %s", p)
+	}
+}
+
+func TestOutputBufferPhaseResetOnNewWindow(t *testing.T) {
+	buf := NewOutputBuffer()
+	// First idle window: compile
+	buf.Write([]byte("> go build"))
+	if p := buf.CurrentPhase(); p != PhaseCompile {
+		t.Fatalf("expected PhaseCompile before reset, got %s", p)
+	}
+	buf.Reset()
+	// Second idle window: test
+	buf.Write([]byte("> go test"))
 	if p := buf.CurrentPhase(); p != PhaseTest {
-		t.Fatalf("expected PhaseTest (latest trigger), got %s", p)
+		t.Fatalf("expected PhaseTest after reset, got %s", p)
 	}
 }
 

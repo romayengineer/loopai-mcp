@@ -64,11 +64,17 @@ func (b *OutputBuffer) Write(data []byte) {
 
 	b.buf.Write(clean)
 
-	// Detect phase on cleaned data to ensure consistency with Analyze().
-	// This prevents false negatives when ANSI codes interrupt phase triggers.
-	if p := detectPhaseTrigger(string(clean)); p != PhaseUnknown {
-		slog.Debug("phase detected", "phase", p)
-		b.phase = p
+	// Detect phase on cleaned data. Only set phase if no phase has been
+	// detected yet in this buffer window. This ensures the FIRST tool
+	// invocation is used for analysis, even if a second tool trigger
+	// appears in the same output batch (e.g. "go build" followed by
+	// "go test" in rapid succession). The output buffer is reset on
+	// each idle event, so the next idle window starts fresh.
+	if b.phase == PhaseUnknown {
+		if p := detectPhaseTrigger(string(clean)); p != PhaseUnknown {
+			slog.Debug("phase detected", "phase", p)
+			b.phase = p
+		}
 	}
 }
 

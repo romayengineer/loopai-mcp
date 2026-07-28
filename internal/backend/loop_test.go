@@ -13,7 +13,7 @@ import (
 // mockPromptRenderer implements PromptRenderer for testing.
 type mockPromptRenderer struct {
 	mu       sync.Mutex
-	names    []string  // records which templates were requested
+	names    []string     // records which templates were requested
 	received []PromptVars // records the vars passed to each Render call
 }
 
@@ -215,6 +215,85 @@ func TestGateErrorsFieldIsExtracted(t *testing.T) {
 	}
 	if !strings.Contains(vars.Errors, "main.go:23") {
 		t.Fatalf("Errors should contain error lines, got: %q", vars.Errors)
+	}
+}
+
+// TestGatePromptCooldown verifies that consecutive send calls for the same
+// prompt name are throttled within promptCooldown. Only the first should go through.
+func TestGatePromptCooldown(t *testing.T) {
+	renderer := &mockPromptRenderer{}
+	analyzer := &mockAnalyzer{
+		result: GateResult{Phase: PhaseCompile, Result: ResultFailure},
+	}
+	gate := NewGate(analyzer, renderer)
+	var conn mockLauncherConn
+
+	// First call should send the prompt
+	gate.handleIdle(context.Background(), &conn)
+	if len(conn.messages) != 1 {
+		t.Fatalf("expected 1 message on first call, got %d", len(conn.messages))
+	}
+	conn.messages = nil
+	analyzer.result = GateResult{Phase: PhaseCompile, Result: ResultFailure}
+
+	// Second call immediately after should be suppressed by cooldown
+	gate.handleIdle(context.Background(), &conn)
+	if len(conn.messages) != 0 {
+		t.Fatalf("expected 0 messages (cooldown), got %d", len(conn.messages))
+	}
+	// Verify only one template render happened
+	names := renderer.Names()
+	if len(names) != 1 {
+		t.Fatalf("expected 1 template render, got %d: %v", len(names), names)
+	}
+}
+
+// TestGatePromptCooldownDifferentNamesNotThrottled verifies that different
+// prompt names are not throttled by each other's cooldown.
+func TestGatePromptCooldownDifferentNamesNotThrottled(t *testing.T) {
+	renderer := &mockPromptRenderer{}
+	analyzer := &mockAnalyzer{}
+	gate := NewGate(analyzer, renderer)
+	var conn mockLauncherConn
+
+	// First idle: compile failure
+	analyzer.result = GateResult{Phase: PhaseCompile, Result: ResultFailure}
+	gate.handleIdle(context.Background(), &conn)
+	if len(conn.messages) != 1 {
+		t.Fatalf("expected 1 message for compile-fail, got %d", len(conn.messages))
+	}
+	conn.messages = nil
+
+	// Second idle immediately: different prompt (lint success) should not be throttled
+	analyzer.result = GateResult{Phase: PhaseLint, Result: ResultSuccess}
+	gate.handleIdle(context.Background(), &conn)
+	if len(conn.messages) != 1 {
+		t.Fatalf("expected 1 message for lint-pass, got %d", len(conn.messages))
+	}
+}
+
+// TestGateIdleCooldownResetsAfterTimeout verifies that the idle prompt
+// cooldown only applies to the PhaseUnknown case and resets after the
+// 30-second window.
+func TestGateIdleCooldownResetsAfterTimeout(t *testing.T) {
+	renderer := &mockPromptRenderer{}
+	buf := NewOutputBuffer()
+	gate := NewGate(buf, renderer)
+	var conn mockLauncherConn
+
+	// First idle with output but no phase -> send idle prompt
+	gate.handleOutput([]byte("I'm thinking about the code\n"))
+	gate.handleIdle(context.Background(), &conn)
+	if len(conn.messages) != 1 {
+		t.Fatalf("expected 1 message for first idle, got %d", len(conn.messages))
+	}
+	conn.messages = nil
+
+	// Second idle immediately -> suppressed by 30s cooldown
+	buf.Write([]byte("Still thinking...\n"))
+	gate.handleIdle(context.Background(), &conn)
+	if len(conn.messages) != 0 {
+		t.Fatalf("expected 0 messages (idle cooldown), got %d", len(conn.messages))
 	}
 }
 
