@@ -228,3 +228,51 @@ func TestToolCallFraming(t *testing.T) {
 		t.Fatal("expected a phase to be detected even with tool call framing")
 	}
 }
+
+func TestANSIPhaseTriggerStillDetected(t *testing.T) {
+	buf := NewOutputBuffer()
+	buf.Write([]byte("\x1b[31m> go build ./...\x1b[0m\n"))
+	if p := buf.CurrentPhase(); p != PhaseCompile {
+		t.Fatalf("expected PhaseCompile even with ANSI escapes, got %s", p)
+	}
+}
+
+func TestAnalyzeLintEmptyOutputSuccess(t *testing.T) {
+	r := analyzeOutput("", PhaseLint)
+	if r != ResultSuccess {
+		t.Fatalf("expected ResultSuccess for empty lint output, got %s", r)
+	}
+}
+
+func TestAnalyzeTestUnmatchedOutputUnknown(t *testing.T) {
+	r := analyzeOutput("some random output", PhaseTest)
+	if r != ResultUnknown {
+		t.Fatalf("expected ResultUnknown for unmatched test output, got %s", r)
+	}
+}
+
+func TestAnalyzeCompileWithOutputButNoError(t *testing.T) {
+	// "go build" that prints something but not an error (e.g. build stats)
+	r := analyzeOutput("> go build ./...\n", PhaseCompile)
+	if r != ResultSuccess {
+		t.Fatalf("expected ResultSuccess for non-error build output, got %s", r)
+	}
+}
+
+func TestOutputBufferConcurrentWrite(t *testing.T) {
+	buf := NewOutputBuffer()
+	done := make(chan struct{})
+	go func() {
+		for i := 0; i < 100; i++ {
+			buf.Write([]byte("> go build\n"))
+			buf.Analyze()
+			buf.Reset()
+		}
+		close(done)
+	}()
+	for i := 0; i < 100; i++ {
+		buf.Write([]byte("some output\n"))
+		_ = buf.String()
+	}
+	<-done
+}
