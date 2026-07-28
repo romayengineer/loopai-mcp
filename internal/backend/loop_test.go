@@ -425,3 +425,106 @@ func TestGatePhaseAttemptsResetOnNewPhase(t *testing.T) {
 		t.Fatalf("expected 2 total attempts (1 compile + 1 lint), got %d", vars.TotalAttempts)
 	}
 }
+
+// TestHandleLauncherCustomGateFactory verifies that HandleLauncher uses
+// NewGateFunc to create the Gate, enabling dependency injection.
+func TestHandleLauncherCustomGateFactory(t *testing.T) {
+	orig := NewGateFunc
+	defer func() { NewGateFunc = orig }()
+
+	var created bool
+	NewGateFunc = func() *Gate {
+		created = true
+		return NewGate(&mockAnalyzer{}, &mockPromptRenderer{})
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	conn := &mockConnReceiveSequence{
+		messages: []proto.Message{
+			{Type: proto.MsgExited, Payload: []byte(`{"code":0}`)},
+		},
+	}
+
+	HandleLauncher(ctx, conn)
+	if !created {
+		t.Fatal("expected NewGateFunc to be called")
+	}
+}
+
+// TestGateOutputCapping verifies that the Output field in PromptVars
+// is capped at defaultMaxErrorBytes.
+func TestGateOutputCapping(t *testing.T) {
+	renderer := &mockPromptRenderer{}
+	buf := NewOutputBuffer()
+	gate := NewGate(buf, renderer)
+
+	// Write output larger than the cap
+	large := make([]byte, defaultMaxErrorBytes*2)
+	for i := range large {
+		large[i] = 'A'
+	}
+	gate.handleOutput(append([]byte("> go build ./...\n"), large...))
+	gate.handleIdle(context.Background(), &mockLauncherConn{})
+
+	vars := renderer.LastVars()
+	if len(vars.Output) > defaultMaxErrorBytes {
+		t.Fatalf("expected Output capped at %d, got %d bytes", defaultMaxErrorBytes, len(vars.Output))
+	}
+	if vars.BufSize < defaultMaxErrorBytes {
+		t.Fatalf("expected BufSize to report actual size (%d+), got %d", defaultMaxErrorBytes, vars.BufSize)
+	}
+}
+
+// TestGatePhaseAttemptsResetOnSuccess verifies that attempts counter
+// resets to 0 when a phase succeeds.
+func TestGatePhaseAttemptsResetOnSuccess(t *testing.T) {
+	renderer := &mockPromptRenderer{}
+	buf := NewOutputBuffer()
+	gate := NewGate(buf, renderer)
+	gate.promptCooldown = 0
+
+	// First: compile fails
+	gate.handleOutput([]byte("> go build ./...\n"))
+	gate.handleOutput([]byte("./main.go:5:2: undefined: Foo\n"))
+	gate.handleIdle(context.Background(), &mockLauncherConn{})
+
+	vars := renderer.LastVars()
+	if vars.PhaseAttempts != 1 {
+		t.Fatalf("expected 1 compile attempt after failure, got %d", vars.PhaseAttempts)
+	}
+
+	// Second: compile passes — should reset attempts to 0
+	buf.Write([]byte("> go build ./...\n"))
+	gate.handleIdle(context.Background(), &mockLauncherConn{})
+
+	vars2 := renderer.LastVars()
+	if vars2.PhaseAttempts != 0 {
+		t.Fatalf("expected 0 compile attempts after success, got %d", vars2.PhaseAttempts)
+	}
+	if vars2.Result != "success" {
+		t.Fatalf("expected success result, got %s", vars2.Result)
+	}
+}
+
+// TestGatePhaseAttemptsAccumulatesAcrossFailures verifies that attempts
+// accumulate across multiple failures in a row.
+func TestGatePhaseAttemptsAccumulatesAcrossFailures(t *testing.T) {
+	renderer := &mockPromptRenderer{}
+	buf := NewOutputBuffer()
+	gate := NewGate(buf, renderer)
+	gate.promptCooldown = 0
+
+	// Three consecutive compile failures
+	for i := 0; i < 3; i++ {
+		buf.Write([]byte("> go build ./...\n"))
+		buf.Write([]byte("./main.go:5:2: undefined: Foo\n"))
+		gate.handleIdle(context.Background(), &mockLauncherConn{})
+	}
+
+	vars := renderer.LastVars()
+	if vars.PhaseAttempts != 3 {
+		t.Fatalf("expected 3 compile attempts after 3 failures, got %d", vars.PhaseAttempts)
+	}
+}

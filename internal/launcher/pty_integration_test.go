@@ -400,3 +400,34 @@ func TestDisablePTYEchoNoEscapeSequences(t *testing.T) {
 		t.Fatalf("marker appears %d times — PTY ECHO is still active: %q", markerCount, output)
 	}
 }
+
+func TestSpawnContextCancelledBeforeStart(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := SpawnContext(ctx, "echo", []string{"hello"})
+	if err == nil {
+		t.Fatal("expected error from SpawnContext with cancelled context")
+	}
+}
+
+func TestSpawnContextCancelsRunningProcess(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	proc, err := SpawnContext(ctx, "sh", []string{"-c", "while true; do sleep 1; done"})
+	if err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+	defer proc.Close()
+
+	// Cancel the context — the process should be killed.
+	cancel()
+
+	select {
+	case <-proc.Wait():
+		// Process exited — success.
+	case <-time.After(5 * time.Second):
+		t.Fatal("process did not exit within 5s of context cancellation")
+	}
+}

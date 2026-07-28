@@ -172,3 +172,28 @@ func TestForwardSignalsExitsOnDoneChannel(t *testing.T) {
 		t.Fatal("forwardSignals did not exit when done channel closed")
 	}
 }
+
+// TestForwardSignalsExitsOnContextCancellation verifies that forwardSignals
+// exits when the context is cancelled, even if the done channel is still open.
+func TestForwardSignalsExitsOnContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cmd := &exec.Cmd{}
+	done := make(chan struct{}) // never closed
+	sigCh := make(chan os.Signal, 1)
+
+	exited := make(chan struct{})
+	go func() {
+		forwardSignals(ctx, cmd, done, sigCh)
+		close(exited)
+	}()
+
+	// Cancel the context — handler should exit via ctx.Done() path.
+	cancel()
+
+	select {
+	case <-exited:
+		// Success
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("forwardSignals did not exit when context was cancelled")
+	}
+}

@@ -53,25 +53,36 @@ func (g *Gate) handleIdle(ctx context.Context, conn LauncherConn) {
 	rawOutput := g.output.String()
 	g.output.Reset()
 
-	// Track phase attempts. Increment when a phase produces a failure result,
-	// so the prompt template can detect when the model is stuck in a loop.
-	if phase != PhaseUnknown && res == ResultFailure {
-		g.attempts[phase]++
-	} else if phase == PhaseUnknown && len(rawOutput) > 0 {
+	// Track phase attempts. Increment on failure so the prompt template can
+	// detect when the model is stuck in a loop. Reset on success so the
+	// counter starts fresh when a phase passes and later fails again.
+	if phase != PhaseUnknown {
+		switch res {
+		case ResultFailure:
+			g.attempts[phase]++
+		case ResultSuccess:
+			g.attempts[phase] = 0
+		}
+	} else if len(rawOutput) > 0 {
 		// Count unknown-phase idle events as context for the "idle" prompt.
 		g.attempts[PhaseUnknown]++
 	}
 
-	// Extract only the error lines from the output instead of passing the
-	// entire (potentially multi-megabyte) buffer. This keeps prompt template
-	// rendering fast and avoids sending huge amounts of text to the client.
+	// Extract only the error lines from the output.
 	errLines := extractErrorLinesMax(rawOutput, phase, defaultMaxErrorBytes)
+
+	// Cap the full output to prevent multi-megabyte payloads being passed
+	// to prompt templates (which would slow rendering and waste bandwidth).
+	outputCap := rawOutput
+	if len(outputCap) > defaultMaxErrorBytes {
+		outputCap = outputCap[:defaultMaxErrorBytes]
+	}
 
 	vars := PromptVars{
 		Phase:         phase.String(),
 		Result:        res.String(),
 		BufSize:       len(rawOutput),
-		Output:        rawOutput,
+		Output:        outputCap,
 		Errors:        errLines,
 		PhaseAttempts: g.attempts[phase],
 		TotalAttempts: g.attempts[PhaseCompile] + g.attempts[PhaseLint] + g.attempts[PhaseTest],

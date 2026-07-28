@@ -322,6 +322,45 @@ func TestAnalyzeCompileWithOutputButNoError(t *testing.T) {
 	}
 }
 
+func TestAnalyzeGoModErrorPatterns(t *testing.T) {
+	tests := []struct {
+		name   string
+		output string
+	}{
+		{"cannot find module", "go: github.com/user/repo: cannot find module providing package"},
+		{"missing go.sum", "missing go.sum entry for module github.com/user/repo v1.2.3"},
+		{"inconsistent vendoring", "inconsistent vendoring: package is in vendor but not in go.mod"},
+		{"found packages", "found packages e (e.go) and main (main.go) in /tmp/test"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := analyzeOutput(tt.output, PhaseCompile)
+			if r != ResultFailure {
+				t.Errorf("expected ResultFailure for %q, got %s", tt.output, r)
+			}
+		})
+	}
+}
+
+func TestExtractErrorLinesGoModErrors(t *testing.T) {
+	output := "go: github.com/user/repo: cannot find module providing package\n> go build\n"
+	got := extractErrorLines(output, PhaseCompile)
+	if !strings.Contains(got, "cannot find module") {
+		t.Errorf("expected error lines to contain 'cannot find module', got: %q", got)
+	}
+	if strings.Contains(got, "go build") {
+		t.Errorf("expected error lines not to contain command echo, got: %q", got)
+	}
+}
+
+func TestExtractErrorLinesGoSumErrors(t *testing.T) {
+	output := "missing go.sum entry for module\nsome other text"
+	got := extractErrorLines(output, PhaseCompile)
+	if !strings.Contains(got, "missing go.sum") {
+		t.Errorf("expected error lines to contain 'missing go.sum', got: %q", got)
+	}
+}
+
 func TestOutputBufferConcurrentWrite(t *testing.T) {
 	buf := NewOutputBuffer()
 	done := make(chan struct{})

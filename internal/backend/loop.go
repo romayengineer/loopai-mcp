@@ -8,9 +8,19 @@ import (
 	"github.com/romayengineer/loopai-mcp/internal/proto"
 )
 
+// GateFactory is a function that creates a Gate for a launcher connection.
+// Enables dependency injection for testing without modifying global state.
+type GateFactory func() *Gate
+
 // DefaultPromptsDir is the directory containing prompt template files.
 // Set before starting the backend to use a custom location.
 var DefaultPromptsDir = "prompts"
+
+// defaultGateFactory creates a Gate with the default output buffer and
+// prompt loader using DefaultPromptsDir.
+func defaultGateFactory() *Gate {
+	return NewGate(NewOutputBuffer(), NewPromptLoader(DefaultPromptsDir))
+}
 
 // HandleLauncher drives the enforcement loop for a single launcher connection.
 // It reads output/idle/exited messages, runs phase detection, and sends fix
@@ -18,9 +28,14 @@ var DefaultPromptsDir = "prompts"
 //
 // The handler exits when the client exits (MsgExited) or disconnects,
 // ensuring proper cleanup via defer conn.Close().
+//
+// Gate creation can be customized by setting NewGateFunc before starting
+// the backend. The default uses NewOutputBuffer and NewPromptLoader.
+var NewGateFunc GateFactory = defaultGateFactory
+
 func HandleLauncher(ctx context.Context, conn LauncherConn) {
 	defer conn.Close()
-	gate := NewGate(NewOutputBuffer(), NewPromptLoader(DefaultPromptsDir))
+	gate := NewGateFunc()
 
 	for {
 		select {

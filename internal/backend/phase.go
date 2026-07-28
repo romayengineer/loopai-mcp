@@ -70,6 +70,10 @@ var compilePatterns = []phaseMatch{
 	{Trigger: regexp.MustCompile(`(?m)compilation error`), Result: ResultFailure},
 	{Trigger: regexp.MustCompile(`(?m)cannot find package`), Result: ResultFailure},
 	{Trigger: regexp.MustCompile(`(?m)undefined:`), Result: ResultFailure},
+	{Trigger: regexp.MustCompile(`(?m)cannot find module`), Result: ResultFailure},
+	{Trigger: regexp.MustCompile(`(?m)missing go.sum`), Result: ResultFailure},
+	{Trigger: regexp.MustCompile(`(?m)inconsistent vendoring`), Result: ResultFailure},
+	{Trigger: regexp.MustCompile(`(?m)found packages`), Result: ResultFailure},
 }
 
 var testPatterns = []phaseMatch{
@@ -93,6 +97,7 @@ var phaseTriggers = []struct {
 	{Phase: PhaseCompile, Regexp: regexp.MustCompile(`(?m)\bgo vet\b`)},
 	{Phase: PhaseCompile, Regexp: regexp.MustCompile(`(?m)\bgo mod\b`)},
 	{Phase: PhaseCompile, Regexp: regexp.MustCompile(`(?m)\bgo generate\b`)},
+	{Phase: PhaseCompile, Regexp: regexp.MustCompile(`(?m)\bgo run\b`)},
 	{Phase: PhaseLint, Regexp: regexp.MustCompile(`(?m)\bgolangci-lint\b`)},
 	{Phase: PhaseLint, Regexp: regexp.MustCompile(`(?m)\blint\b`)},
 	{Phase: PhaseTest, Regexp: regexp.MustCompile(`(?m)\bgo test\b`)},
