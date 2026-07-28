@@ -6,7 +6,9 @@ GOLANGCI_LINT := $(shell go env GOPATH)/bin/golangci-lint
 all: build lint test-all
 
 build:
-	go build ./cmd/...
+	go build -o loopai ./cmd/loopai
+	go build -o loopai-backend ./cmd/loopai-backend
+	go build -o loopai-capture ./cmd/loopai-capture
 
 fmt:
 	gofmt -s -l .
