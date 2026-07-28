@@ -10,6 +10,11 @@
 # Build output
 /bin/
 
+# Stray binaries from manual `go build` inside cmd/
+/cmd/loopai/loopai
+/cmd/loopai-backend/loopai-backend
+/cmd/loopai-capture/loopai-capture
+
 # Data files
 *.raw
 
