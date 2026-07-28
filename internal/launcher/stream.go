@@ -94,11 +94,18 @@ func PipeBackendToPTY(ctx context.Context, receiver MessageReceiver, proc PtyWri
 				slog.Warn("bad type payload", "error", err)
 				continue
 			}
-			input := []byte(p.Text + "\n")
-			slog.Debug("typed into PTY", "text", p.Text, "len", len(p.Text))
-			if _, err := proc.Write(input); err != nil {
-				return fmt.Errorf("write to PTY: %w", err)
+			// Write the prompt text (no trailing newline — the client's TUI
+			// would display it as literal text rather than submitting it).
+			if _, err := proc.Write([]byte(p.Text)); err != nil {
+				return fmt.Errorf("write prompt to PTY: %w", err)
 			}
+			// Send carriage return to simulate Enter keypress. In raw terminal
+			// mode the Enter key produces \r, not \n. The client's TUI (Claude
+			// Code, etc.) recognizes \r as the "submit input" command.
+			if _, err := proc.Write([]byte("\r")); err != nil {
+				return fmt.Errorf("write enter to PTY: %w", err)
+			}
+			slog.Debug("typed into PTY", "text", p.Text, "len", len(p.Text))
 
 		case proto.MsgCtrlC:
 			slog.Debug("sending ctrl+c")

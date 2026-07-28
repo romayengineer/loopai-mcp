@@ -195,8 +195,8 @@ func TestPipeBackendToPTYType(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected nil, got %v", err)
 	}
-	if pty.String() != "hello\n" {
-		t.Fatalf("expected 'hello\\n', got %q", pty.String())
+	if pty.String() != "hello\r" {
+		t.Fatalf("expected 'hello\\r', got %q", pty.String())
 	}
 }
 
