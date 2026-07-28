@@ -23,6 +23,7 @@ lint:
 
 test-unit:
 	go test -race ./internal/... -count=1 -timeout 30s
+	go test -race ./cmd/loopai ./cmd/loopai-capture -count=1 -timeout 30s
 
 test-integration:
 	go test -tags=integration ./internal/... -count=1 -timeout 30s
@@ -34,8 +35,8 @@ test:
 	go test -tags=integration ./internal/... -count=1 -timeout 30s
 
 cover:
-	@go test -coverprofile=/tmp/loopai-cover.out ./internal/... -count=1 -timeout 30s > /dev/null 2>&1
-	@go test -coverprofile=/tmp/loopai-cover-integration.out -coverpkg=./internal/... -tags=integration ./internal/... -count=1 -timeout 30s > /dev/null 2>&1
+	@go test -coverprofile=/tmp/loopai-cover.out ./internal/... ./cmd/loopai ./cmd/loopai-capture -count=1 -timeout 30s > /dev/null 2>&1
+	@go test -coverprofile=/tmp/loopai-cover-integration.out -coverpkg=./internal/...,./cmd/... -tags=integration ./internal/... ./cmd/... -count=1 -timeout 120s > /dev/null 2>&1
 	@echo "=== Unit test coverage ==="
 	@go tool cover -func=/tmp/loopai-cover.out | grep total | awk '{print $$3}'
 	@echo "=== Combined (unit + integration) coverage ==="
