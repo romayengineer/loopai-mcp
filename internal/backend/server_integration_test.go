@@ -12,6 +12,10 @@ import (
 	"github.com/romayengineer/loopai-mcp/internal/proto"
 )
 
+func init() {
+	DefaultPromptsDir = "../../prompts"
+}
+
 const testStartupTimeout = 200 * time.Millisecond
 
 func socketPath(t *testing.T, name string) string {

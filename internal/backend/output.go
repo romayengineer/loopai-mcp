@@ -9,7 +9,10 @@ import (
 // maxBufferSize limits the output buffer to prevent memory exhaustion.
 // Typical compile/test output is 1-2MB; 10MB is a generous limit that
 // catches pathological cases (e.g., infinite loop printing to stdout).
-const maxBufferSize = 10 * 1024 * 1024
+const (
+	maxBufferSize    = 10 * 1024 * 1024
+	maxTriggerSample = 4 * 1024 // max bytes used for phase trigger detection
+)
 
 // OutputAnalyzer is the interface for analyzing terminal output and
 // determining the current phase and its result. Decouples the
@@ -64,14 +67,17 @@ func (b *OutputBuffer) Write(data []byte) {
 
 	b.buf.Write(clean)
 
-	// Detect phase on cleaned data. Only set phase if no phase has been
-	// detected yet in this buffer window. This ensures the FIRST tool
-	// invocation is used for analysis, even if a second tool trigger
-	// appears in the same output batch (e.g. "go build" followed by
-	// "go test" in rapid succession). The output buffer is reset on
-	// each idle event, so the next idle window starts fresh.
+	// Detect phase on a sample of the cleaned data (first 4KB). Phase
+	// trigger patterns are simple keywords ("go build", "golangci-lint")
+	// that always appear at the start of a tool command line, so a small
+	// sample is sufficient. Truncating prevents regex slowdown on large
+	// output (e.g. 2MB build logs).
 	if b.phase == PhaseUnknown {
-		if p := detectPhaseTrigger(string(clean)); p != PhaseUnknown {
+		sample := clean
+		if len(sample) > maxTriggerSample {
+			sample = sample[:maxTriggerSample]
+		}
+		if p := detectPhaseTrigger(string(sample)); p != PhaseUnknown {
 			slog.Debug("phase detected", "phase", p)
 			b.phase = p
 		}

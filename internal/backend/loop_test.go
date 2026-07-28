@@ -113,11 +113,16 @@ func (c *mockConnReceiveSequence) Close() error {
 	return nil
 }
 
+func testPrompts() *PromptLoader {
+	// When running go test, the working directory is the package directory
+	// (internal/backend/). Prompts are at the project root (../../prompts/).
+	return NewPromptLoader("../../prompts")
+}
+
 func TestGateHandleIdleSendError(t *testing.T) {
-	// handleIdle's send() closure should log and continue on Send error.
 	gate := NewGate(&mockAnalyzer{
 		result: GateResult{Phase: PhaseCompile, Result: ResultSuccess},
-	}, NewPromptLoader("."))
+	}, testPrompts())
 	var conn mockLauncherConnSendError
 
 	gate.handleIdle(context.Background(), &conn)
@@ -143,7 +148,7 @@ func TestGateHandleIdle(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			gate := NewGate(&mockAnalyzer{
 				result: GateResult{Phase: tt.phase, Result: tt.result},
-			}, NewPromptLoader("."))
+			}, testPrompts())
 			var conn mockLauncherConn
 
 			gate.handleIdle(context.Background(), &conn)

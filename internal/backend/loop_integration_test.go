@@ -13,6 +13,10 @@ import (
 	"github.com/romayengineer/loopai-mcp/internal/proto"
 )
 
+func init() {
+	DefaultPromptsDir = "../../prompts"
+}
+
 func loopSocketPath(t *testing.T, name string) string {
 	t.Helper()
 	path := "/tmp/loopai-loop-" + name
