@@ -47,17 +47,24 @@ func main() {
 
 	errCh := make(chan error, 2)
 	go func() {
-		errCh <- launcher.PipePTYToBackend(pc, proc, idle)
+		err := launcher.PipePTYToBackend(pc, proc, idle)
+		errCh <- err
 	}()
 	go func() {
-		errCh <- launcher.PipeBackendToPTY(pc, proc)
+		err := launcher.PipeBackendToPTY(pc, proc)
+		errCh <- err
 	}()
 
-	<-errCh
+	firstErr := <-errCh
 	idle.Stop()
+
+	if firstErr != nil {
+		log.Printf("pipe error: %v", firstErr)
+	}
 
 	<-proc.Wait()
 	exitCode := proc.ExitCode()
+	log.Printf("exit code = %d", exitCode)
 	pc.Send(proto.NewMessage(proto.MsgExited, proto.ExitedPayload{
 		Code: exitCode,
 	}))

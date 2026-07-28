@@ -43,17 +43,22 @@ If any step fails, the server prompts the model to fix it before proceeding. The
 
 | Directory | Language | Role |
 |---|---|---|
-| `backend/go/` | Go | Core server — reads terminal output, decides actions, drives enforcement |
-| `launcher/` | Go | PTY lifecycle, client process management, terminal I/O streaming, idle detection |
+| `cmd/loopai-backend/` | Go | Backend entrypoint — Unix socket listener, dispatches to loop |
+| `cmd/loopai/` | Go | Launcher entrypoint — PTY spawn, CLI parsing, socket connect |
+| `internal/backend/` | Go | Backend server + enforcement loop state machine |
+| `internal/launcher/` | Go | PTY lifecycle, I/O streaming, idle detection |
+| `internal/proto/` | Go | Shared message types, Unix socket connect/listen helpers |
 
 ## Commands
 
-Root-level `make` (or `task`) orchestrates all sub-projects. As tooling is chosen, fill in exact commands per package below.
+Root-level `make` (or `task`) orchestrates all sub-projects. Fill in exact commands as tooling is chosen.
 
-- **Backend:** `go build ./backend/go/...`, `go test ./backend/go/...`
-- **Launcher:** `go build ./launcher/...`
-- **Backend service:** `loopai-backend` (starts on `:8090`)
-- **Launcher:** `loopai` (spawns client, streams I/O to backend)
+- **Build all:** `go build ./cmd/...`
+- **Test all:** `go test ./internal/...`
+- **Test single pkg:** `go test ./internal/launcher/`
+- **Test integration:** `go test -tags=integration ./internal/...` (runs real I/O, no mocks)
+- **Backend:** `loopai-backend` (starts on Unix socket at `~/.config/loopai/loopai.sock`)
+- **Launcher:** `loopai -client claude "prompt"` (spawns client, streams I/O to backend)
 
 ## Conventions
 
@@ -61,7 +66,11 @@ Root-level `make` (or `task`) orchestrates all sub-projects. As tooling is chose
 - When adding new enforcement rules, add them in all three places: server logic, pre-commit hook, CI workflow.
 - The launcher must never import a client SDK or plugin package. It speaks PTY I/O only.
 - Idle detection is timeout-based (N ms with no output). No client-specific prompt string parsing.
-- The Go backend and launcher communicate over HTTP/WebSocket. Protocol definitions live in a shared package.
+- The Go backend and launcher communicate over a Unix socket using newline-delimited JSON. Protocol types live in `internal/proto/`.
+- **Write tests for every change.** Two kinds:
+  - **Unit tests** — test a single function/struct in isolation. Fast, no external deps. Stored in `*_test.go` alongside the code.
+  - **Integration tests** — test real I/O (sockets, PTY, process spawning). Do NOT mock the OS. Stored in `*_integration_test.go` with `//go:build integration` build tag. Run with `go test -tags=integration`.
+- **Every new feature or bugfix must include both unit and integration tests.** The integration test validates the real end-to-end path; the unit test validates edge cases around it.
 
 ## Open items
 

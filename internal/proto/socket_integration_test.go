@@ -1,0 +1,195 @@
+//go:build integration
+
+package proto_test
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/romayengineer/loopai-mcp/internal/proto"
+)
+
+func socketPath(t *testing.T, name string) string {
+	t.Helper()
+	// Use /tmp directly to avoid long paths that exceed Unix socket length limits.
+	path := filepath.Join("/tmp", "loopai-test-"+name)
+	os.Remove(path)
+	t.Cleanup(func() { os.Remove(path) })
+	return path
+}
+
+func TestSocketListenConnectRoundTrip(t *testing.T) {
+	socketPath := socketPath(t, "roundtrip.sock")
+
+	ln, err := proto.Listen(socketPath)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+
+	conn, err := proto.Connect(socketPath)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer conn.Close()
+
+	serverConn, err := ln.Accept()
+	if err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+	defer serverConn.Close()
+
+	clientSide := proto.NewConn(conn)
+	serverSide := proto.NewConn(serverConn)
+
+	sendMsg := proto.NewMessage(proto.MsgStarted, proto.StartedPayload{Pid: 100, Client: "test"})
+	if err := clientSide.Send(sendMsg); err != nil {
+		t.Fatalf("client send: %v", err)
+	}
+
+	recvMsg, err := serverSide.Receive()
+	if err != nil {
+		t.Fatalf("server receive: %v", err)
+	}
+	if recvMsg.Type != proto.MsgStarted {
+		t.Fatalf("expected %q, got %q", proto.MsgStarted, recvMsg.Type)
+	}
+	var p proto.StartedPayload
+	if err := json.Unmarshal(recvMsg.Payload, &p); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if p.Pid != 100 || p.Client != "test" {
+		t.Fatalf("unexpected payload: %+v", p)
+	}
+
+	reply := proto.NewMessage(proto.MsgType, proto.TypePayload{Text: "hello"})
+	if err := serverSide.Send(reply); err != nil {
+		t.Fatalf("server send: %v", err)
+	}
+
+	recv2, err := clientSide.Receive()
+	if err != nil {
+		t.Fatalf("client receive: %v", err)
+	}
+	if recv2.Type != proto.MsgType {
+		t.Fatalf("expected %q, got %q", proto.MsgType, recv2.Type)
+	}
+}
+
+func TestSocketMultipleMessages(t *testing.T) {
+	socketPath := socketPath(t, "multi.sock")
+
+	ln, err := proto.Listen(socketPath)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+
+	conn, err := proto.Connect(socketPath)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer conn.Close()
+
+	sc, err := ln.Accept()
+	if err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+	defer sc.Close()
+
+	client := proto.NewConn(conn)
+	server := proto.NewConn(sc)
+
+	messages := []proto.Message{
+		proto.NewMessage(proto.MsgOutput, proto.OutputPayload{Data: []byte("line1\n")}),
+		proto.NewMessage(proto.MsgOutput, proto.OutputPayload{Data: []byte("line2\n")}),
+		proto.NewMessage(proto.MsgIdle, proto.IdlePayload{}),
+		proto.NewMessage(proto.MsgExited, proto.ExitedPayload{Code: 0}),
+	}
+
+	for _, msg := range messages {
+		if err := client.Send(msg); err != nil {
+			t.Fatalf("send: %v", err)
+		}
+	}
+
+	for i, expected := range messages {
+		received, err := server.Receive()
+		if err != nil {
+			t.Fatalf("receive #%d: %v", i, err)
+		}
+		if received.Type != expected.Type {
+			t.Fatalf("msg #%d: expected %q, got %q", i, expected.Type, received.Type)
+		}
+	}
+}
+
+func TestSocketDefaultPath(t *testing.T) {
+	os.Setenv("LOOPAI_SOCKET_DIR", "/tmp/loopai-test")
+	defer os.Unsetenv("LOOPAI_SOCKET_DIR")
+
+	path := proto.DefaultSocketPath()
+	if path != "/tmp/loopai-test/loopai.sock" {
+		t.Fatalf("unexpected path: %s", path)
+	}
+}
+
+func TestSocketCleanupOnListen(t *testing.T) {
+	socketPath := socketPath(t, "cleanup.sock")
+
+	os.WriteFile(socketPath, []byte("stale"), 0644)
+
+	ln, err := proto.Listen(socketPath)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	ln.Close()
+}
+
+func TestSocketBinaryPayload(t *testing.T) {
+	socketPath := socketPath(t, "binary.sock")
+
+	ln, err := proto.Listen(socketPath)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+
+	conn, err := proto.Connect(socketPath)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer conn.Close()
+
+	sc, err := ln.Accept()
+	if err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+	defer sc.Close()
+
+	client := proto.NewConn(conn)
+	server := proto.NewConn(sc)
+
+	binaryData := []byte{0x00, 0x01, 0x02, 0xFE, 0xFF}
+	msg := proto.NewMessage(proto.MsgOutput, proto.OutputPayload{Data: binaryData})
+	if err := client.Send(msg); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+
+	recv, err := server.Receive()
+	if err != nil {
+		t.Fatalf("receive: %v", err)
+	}
+	if recv.Type != proto.MsgOutput {
+		t.Fatalf("expected %q, got %q", proto.MsgOutput, recv.Type)
+	}
+	var p proto.OutputPayload
+	if err := json.Unmarshal(recv.Payload, &p); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(p.Data) != 5 || p.Data[0] != 0x00 || p.Data[4] != 0xFF {
+		t.Fatalf("unexpected binary data: %v", p.Data)
+	}
+}

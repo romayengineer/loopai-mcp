@@ -42,14 +42,17 @@ func Spawn(client string, args []string) (*PtyProcess, error) {
 	go func() {
 		p.exitErr = cmd.Wait()
 		if cmd.ProcessState != nil {
-			if status, ok := cmd.ProcessState.Sys().(syscall.WaitStatus); ok {
+			state := cmd.ProcessState
+			if status, ok := state.Sys().(syscall.WaitStatus); ok {
 				if status.Exited() {
 					p.exitCode = status.ExitStatus()
 				} else if status.Signaled() {
 					p.exitCode = -int(status.Signal())
+				} else {
+					p.exitCode = state.ExitCode()
 				}
 			} else {
-				p.exitCode = cmd.ProcessState.ExitCode()
+				p.exitCode = state.ExitCode()
 			}
 		}
 		close(p.done)
