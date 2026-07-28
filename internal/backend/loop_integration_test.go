@@ -168,16 +168,19 @@ func TestLoopTestFailureThenSuccess(t *testing.T) {
 	}
 }
 
-func TestLoopNoPromptOnNonBuildOutput(t *testing.T) {
-	sp := loopSocketPath(t, "noop.sock")
+func TestLoopProactivePromptOnIdleOutput(t *testing.T) {
+	sp := loopSocketPath(t, "proactive.sock")
 	h := startLoopHarness(t, context.Background(), sp, HandleLauncher)
 
 	h.sendOutput("I'm thinking about the architecture\n")
 	h.sendIdle()
 
-	msg, ok := h.expectMsg(1 * time.Second)
-	if ok {
-		t.Fatalf("expected no prompt, got %s", msg.Type)
+	text := h.readMsgType(2 * time.Second)
+	if len(text) == 0 {
+		t.Fatal("expected proactive prompt on idle output, got nothing")
+	}
+	if len(text) < 10 {
+		t.Fatalf("expected substantial prompt text, got: %q", text)
 	}
 }
 

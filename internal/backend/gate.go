@@ -3,6 +3,7 @@ package backend
 import (
 	"context"
 	"log/slog"
+	"time"
 
 	"github.com/romayengineer/loopai-mcp/internal/proto"
 )
@@ -11,11 +12,14 @@ const (
 	promptCompileFail = "The last compile attempt failed. Fix the errors above and re-run the build."
 	promptLintFail    = "The last lint check found issues. Fix them and re-run the linter."
 	promptTestFail    = "The last test run had failures. Fix them and re-run the tests."
+	promptIdleOutput  = "Review the recent output and apply Go best practices. Ensure error handling, naming conventions, and documentation follow Go idioms. Then run `go vet ./...`, `golangci-lint run ./...`, and `go test ./...`."
+	idleCooldown      = 30 * time.Second
 )
 
 // Gate tracks the enforcement state machine across compile/lint/test phases.
 type Gate struct {
-	output OutputAnalyzer
+	output         OutputAnalyzer
+	lastIdlePrompt time.Time
 }
 
 // NewGate creates a Gate with the given output analyzer.
@@ -89,6 +93,12 @@ func (g *Gate) handleIdle(ctx context.Context, conn LauncherConn) {
 		}
 
 	case PhaseUnknown:
-		slog.Debug("no phase detected on idle, no action")
+		if len(rawOutput) > 0 && time.Since(g.lastIdlePrompt) >= idleCooldown {
+			g.lastIdlePrompt = time.Now()
+			slog.Info("idle output with no phase detected, sending best-practices prompt", "buf_size", len(rawOutput))
+			send(promptIdleOutput)
+		} else {
+			slog.Debug("no phase detected on idle, no action")
+		}
 	}
 }
