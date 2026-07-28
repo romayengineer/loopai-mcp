@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -72,8 +73,18 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	defer pc.Close()
 	defer proc.Close()
+
+	// Use atomic flag to prevent double-close race: signal handler may close
+	// pc while defer is also scheduled to close it. Only close once.
+	closed := atomic.Bool{}
+	defer func() {
+		if closed.CompareAndSwap(false, true) {
+			if err := pc.Close(); err != nil {
+				slog.Debug("close connection", "error", err)
+			}
+		}
+	}()
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
@@ -81,7 +92,12 @@ func main() {
 		sig := <-sigCh
 		slog.Info("shutting down", "signal", sig)
 		cancel()
-		pc.Close()
+		// Attempt close in signal handler; defer will handle cleanup if not closed
+		if closed.CompareAndSwap(false, true) {
+			if err := pc.Close(); err != nil {
+				slog.Debug("close connection", "error", err)
+			}
+		}
 	}()
 
 	msg, err := proto.NewMessage(proto.MsgStarted, proto.StartedPayload{

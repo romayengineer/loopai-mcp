@@ -104,6 +104,9 @@ func Spawn(client string, args []string) (Process, error) {
 	return p, nil
 }
 
+// forwardSignals forwards signals from the parent process to the child process.
+// It handles multiple sequential signals (SIGINT, SIGTERM, SIGHUP) by looping
+// until the process exits. Accepts optional pre-configured signal channel for testing.
 func forwardSignals(cmd *exec.Cmd, done <-chan struct{}, sigCh ...chan os.Signal) {
 	ch := make(chan os.Signal, 1)
 	if len(sigCh) > 0 && sigCh[0] != nil {
@@ -113,16 +116,21 @@ func forwardSignals(cmd *exec.Cmd, done <-chan struct{}, sigCh ...chan os.Signal
 		defer signal.Stop(ch)
 	}
 
-	select {
-	case sig := <-ch:
-		if cmd.Process != nil {
-			if err := cmd.Process.Signal(sig); err != nil {
-				slog.Warn("forward signal", "signal", sig, "error", err)
+	for {
+		select {
+		case sig := <-ch:
+			if cmd.Process != nil {
+				slog.Debug("forwarding signal", "signal", sig, "pid", cmd.Process.Pid)
+				if err := cmd.Process.Signal(sig); err != nil {
+					slog.Warn("forward signal", "signal", sig, "error", err)
+				}
+			} else {
+				slog.Debug("signal before process start", "signal", sig)
 			}
-		} else {
-			slog.Debug("signal before process start", "signal", sig)
+		case <-done:
+			slog.Debug("process exited, stopping signal handler")
+			return
 		}
-	case <-done:
 	}
 }
 

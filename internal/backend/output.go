@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"log/slog"
 	"strings"
 	"sync"
 )
@@ -31,14 +32,18 @@ func NewOutputBuffer() *OutputBuffer {
 }
 
 // Write appends output data, stripping ANSI escape sequences, and
-// updates the detected phase.
+// updates the detected phase. Phase detection is performed on cleaned
+// (ANSI-stripped) data to ensure consistency with buffer analysis.
 func (b *OutputBuffer) Write(data []byte) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	clean := StripANSI(data)
 	b.buf.Write(clean)
 
-	if p := detectPhaseTrigger(string(data)); p != PhaseUnknown {
+	// Detect phase on cleaned data to ensure consistency with Analyze().
+	// This prevents false negatives when ANSI codes interrupt phase triggers.
+	if p := detectPhaseTrigger(string(clean)); p != PhaseUnknown {
+		slog.Debug("phase detected", "phase", p)
 		b.phase = p
 	}
 }

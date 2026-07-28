@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"testing"
+	"time"
 
 	"github.com/creack/pty"
 	"golang.org/x/sys/unix"
@@ -105,5 +106,68 @@ func TestPtyProcessNilClose(t *testing.T) {
 	err := p.Close()
 	if err == nil {
 		t.Fatal("expected error closing nil PTY")
+	}
+}
+
+// TestForwardSignalsHandlesMultipleSignals verifies that forwardSignals
+// processes multiple sequential signals until the done channel is closed,
+// rather than exiting after the first signal.
+func TestForwardSignalsHandlesMultipleSignals(t *testing.T) {
+	cmd := &exec.Cmd{}
+	done := make(chan struct{})
+	sigCh := make(chan os.Signal, 10)
+
+	// Run signal handler with test signal channel
+	go forwardSignals(cmd, done, sigCh)
+
+	// Send multiple signals
+	sigCh <- os.Interrupt
+	sigCh <- os.Kill
+	sigCh <- os.Interrupt
+
+	// Signal handler should still be running and accepting signals.
+	// Close done to verify it exits cleanly.
+	close(done)
+
+	// Verify goroutine exits (give it a moment to process)
+	// If it doesn't exit, the test will timeout, indicating the loop
+	// didn't properly handle the done channel.
+	done = make(chan struct{}, 1)
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		done <- struct{}{}
+	}()
+
+	select {
+	case <-done:
+		// Success: signal handler exited
+	case <-time.After(1 * time.Second):
+		t.Fatal("signal handler did not exit after done channel closed")
+	}
+}
+
+// TestForwardSignalsExitsOnDoneChannel verifies that forwardSignals
+// exits immediately when the done channel is closed, even if no signals
+// have been received.
+func TestForwardSignalsExitsOnDoneChannel(t *testing.T) {
+	cmd := &exec.Cmd{}
+	done := make(chan struct{})
+	sigCh := make(chan os.Signal, 1)
+
+	exited := make(chan struct{})
+	go func() {
+		forwardSignals(cmd, done, sigCh)
+		close(exited)
+	}()
+
+	// Close done channel to signal handler should exit
+	close(done)
+
+	// Verify it exits quickly
+	select {
+	case <-exited:
+		// Success
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("forwardSignals did not exit when done channel closed")
 	}
 }

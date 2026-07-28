@@ -4,6 +4,53 @@ import (
 	"testing"
 )
 
+// TestPhaseDetectionOnCleanedData verifies that phase triggers are detected
+// on ANSI-stripped data, ensuring consistency with buffer analysis.
+// This test ensures that ANSI codes don't break phase trigger detection.
+func TestPhaseDetectionOnCleanedData(t *testing.T) {
+	tests := []struct {
+		name     string
+		data     string
+		expected Phase
+	}{
+		{
+			name:     "clean trigger",
+			data:     "> go build ./...\n",
+			expected: PhaseCompile,
+		},
+		{
+			name:     "with ANSI color codes",
+			data:     "\x1b[32m> go build ./...\x1b[0m\n",
+			expected: PhaseCompile,
+		},
+		{
+			name:     "with mixed ANSI sequences",
+			data:     "\x1b[1m>\x1b[0m \x1b[36mgo build\x1b[0m ./...\n",
+			expected: PhaseCompile,
+		},
+		{
+			name:     "go test with ANSI",
+			data:     "\x1b[32m> go test ./...\x1b[0m\n",
+			expected: PhaseTest,
+		},
+		{
+			name:     "golangci-lint with ANSI",
+			data:     "\x1b[32m> golangci-lint run ./...\x1b[0m\n",
+			expected: PhaseLint,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			buf := NewOutputBuffer()
+			buf.Write([]byte(tt.data))
+			if p := buf.CurrentPhase(); p != tt.expected {
+				t.Errorf("expected phase %s, got %s", tt.expected, p)
+			}
+		})
+	}
+}
+
 func TestDetectGoBuildTrigger(t *testing.T) {
 	buf := NewOutputBuffer()
 	buf.Write([]byte("> go build ./...\n"))
