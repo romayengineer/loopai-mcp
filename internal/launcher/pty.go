@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -28,6 +29,33 @@ const (
 	ptyCloseTimeout = 5 * time.Second
 )
 
+// DisablePTYEcho disables local ECHO on the PTY master. This prevents the
+// PTY from echoing keystrokes back to the user when running in interactive
+// mode (-interactive flag). Without this, every keystroke forwarded from
+// stdin → PTY gets echoed back through the PTY output as raw escape
+// sequences (e.g. ^[[<35u) and appears on the user's terminal alongside
+// the client's TUI output.
+//
+// The PTY starts with ECHO enabled by default (matching real terminal
+// behavior). Interactive mode forwards raw keystrokes to the PTY, but the
+// terminal emulator on the user's side already echoes what the user types.
+// Disabling ECHO on the PTY eliminates the double-echo and the raw escape
+// artifacts while still letting the client receive all keystrokes normally.
+func DisablePTYEcho(ptm *os.File) error {
+	// Get current terminal attributes via TCGETS ioctl.
+	termios, err := unix.IoctlGetTermios(int(ptm.Fd()), unix.TCGETS)
+	if err != nil {
+		return fmt.Errorf("get PTY termios: %w", err)
+	}
+	// Clear ECHO bit in the local mode flags.
+	termios.Lflag &^= unix.ECHO
+	// Apply the modified attributes via TCSETS ioctl.
+	if err := unix.IoctlSetTermios(int(ptm.Fd()), unix.TCSETS, termios); err != nil {
+		return fmt.Errorf("set PTY termios: %w", err)
+	}
+	return nil
+}
+
 // Process is the interface for a PTY-based child process. It decouples
 // consumers from the concrete PtyProcess, enabling alternative implementations
 // for testing.
@@ -37,6 +65,10 @@ type Process interface {
 	Wait() <-chan struct{}
 	ExitCode() int
 	PID() int
+	// DisablePTYEcho disables terminal echo on the PTY. Needed in interactive
+	// mode to prevent keystroke echo from producing raw escape sequences
+	// on the user's terminal. See DisablePTYEcho docs for details.
+	DisablePTYEcho() error
 }
 
 // PtyProcess manages a child process running inside a pseudo-terminal.
@@ -173,6 +205,12 @@ func (p *PtyProcess) PID() int {
 		return p.Cmd.Process.Pid
 	}
 	return -1
+}
+
+// DisablePTYEcho disables terminal echo on this PTY. See the package-level
+// DisablePTYEcho function for details on why this is needed.
+func (p *PtyProcess) DisablePTYEcho() error {
+	return DisablePTYEcho(p.PTY)
 }
 
 // Close closes the PTY file descriptor and kills the process if running.

@@ -46,6 +46,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Disable PTY echo when interactive, so raw keystrokes forwarded from
+	// stdin don't get echoed back as escape sequences (e.g. ^[[<35u).
+	// See launcher.DisablePTYEcho docs for details.
+	if *interactive {
+		if err := proc.DisablePTYEcho(); err != nil {
+			slog.Warn("disable PTY echo", "error", err)
+		}
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	defer pc.Close()

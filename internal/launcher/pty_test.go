@@ -4,6 +4,9 @@ import (
 	"os"
 	"os/exec"
 	"testing"
+
+	"github.com/creack/pty"
+	"golang.org/x/sys/unix"
 )
 
 func newNilPtyProcess() *PtyProcess {
@@ -49,6 +52,38 @@ func TestPtyProcessNilWaitDone(t *testing.T) {
 	done := p.Wait()
 	if done == nil {
 		t.Fatal("Wait returned nil channel")
+	}
+}
+
+func TestDisablePTYEcho(t *testing.T) {
+	// Open a real PTY to test the ECHO disable function.
+	ptm, _, err := pty.Open()
+	if err != nil {
+		t.Fatalf("open PTY: %v", err)
+	}
+	defer ptm.Close()
+
+	// Verify ECHO is initially enabled
+	termios, err := unix.IoctlGetTermios(int(ptm.Fd()), unix.TCGETS)
+	if err != nil {
+		t.Fatalf("get termios: %v", err)
+	}
+	if termios.Lflag&unix.ECHO == 0 {
+		t.Fatal("expected ECHO to be enabled by default")
+	}
+
+	// Disable ECHO
+	if err := DisablePTYEcho(ptm); err != nil {
+		t.Fatalf("DisablePTYEcho: %v", err)
+	}
+
+	// Verify ECHO is now disabled
+	termios, err = unix.IoctlGetTermios(int(ptm.Fd()), unix.TCGETS)
+	if err != nil {
+		t.Fatalf("get termios after disable: %v", err)
+	}
+	if termios.Lflag&unix.ECHO != 0 {
+		t.Fatal("expected ECHO to be disabled after DisablePTYEcho")
 	}
 }
 
