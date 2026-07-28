@@ -48,11 +48,49 @@ func checkAndWritePID(socketPath string) error {
 	return nil
 }
 
+func stopBackend(socketPath string) error {
+	socketDir := filepath.Dir(socketPath)
+	pidPath := filepath.Join(socketDir, "loopai.pid")
+
+	data, err := os.ReadFile(pidPath)
+	if err != nil {
+		return fmt.Errorf("no running backend found at %s: %w", pidPath, err)
+	}
+
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		return fmt.Errorf("invalid pid file %s: %w", pidPath, err)
+	}
+
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		os.Remove(pidPath)
+		return fmt.Errorf("process %d not found: %w", pid, err)
+	}
+
+	if err := proc.Signal(syscall.SIGTERM); err != nil {
+		os.Remove(pidPath)
+		return fmt.Errorf("stop PID %d: %w", pid, err)
+	}
+
+	os.Remove(pidPath)
+	slog.Info("backend stopped", "pid", pid)
+	return nil
+}
+
 func main() {
 	socketPath := flag.String("socket", proto.DefaultSocketPath(), "unix socket path")
 	flag.Parse()
 
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
+
+	if flag.NArg() > 0 && flag.Arg(0) == "stop" {
+		if err := stopBackend(*socketPath); err != nil {
+			slog.Error("stop", "error", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	if err := checkAndWritePID(*socketPath); err != nil {
 		slog.Error("pid check", "error", err)

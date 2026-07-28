@@ -95,6 +95,42 @@ func TestPidCheckRunning(t *testing.T) {
 	}
 }
 
+func TestPidStopRunning(t *testing.T) {
+	dir := socketDir(t, "stoprunning")
+	sp := filepath.Join(dir, "loopai.sock")
+
+	// Start a fake "backend" process
+	cmd := exec.Command("sh", "-c", "trap '' TERM; while true; do sleep 1; done")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start helper: %v", err)
+	}
+	defer cmd.Process.Kill()
+
+	// Write its pid to the pid file
+	pidPath := filepath.Join(dir, "loopai.pid")
+	if err := os.WriteFile(pidPath, []byte(fmt.Sprintf("%d\n", cmd.Process.Pid)), 0644); err != nil {
+		t.Fatalf("write pid: %v", err)
+	}
+
+	// stopBackend sends SIGTERM and removes the pid file
+	stopBackend(sp)
+
+	// Verify pid file was removed
+	if _, err := os.Stat(pidPath); !os.IsNotExist(err) {
+		t.Fatalf("expected pid file to be removed, got: %v", err)
+	}
+}
+
+func TestPidStopNoPidFile(t *testing.T) {
+	dir := socketDir(t, "stoppid")
+	sp := filepath.Join(dir, "loopai.sock")
+
+	err := stopBackend(sp)
+	if err == nil {
+		t.Fatal("expected error when no pid file exists, got nil")
+	}
+}
+
 func TestBackendBinaryStartsAndAcceptsConnection(t *testing.T) {
 	sp := socketPath(t, "backend.sock")
 
