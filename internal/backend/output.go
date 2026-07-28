@@ -6,6 +6,11 @@ import (
 	"sync"
 )
 
+// maxBufferSize limits the output buffer to prevent memory exhaustion.
+// Typical compile/test output is 1-2MB; 10MB is a generous limit that
+// catches pathological cases (e.g., infinite loop printing to stdout).
+const maxBufferSize = 10 * 1024 * 1024
+
 // OutputAnalyzer is the interface for analyzing terminal output and
 // determining the current phase and its result. Decouples the
 // enforcement state machine from the concrete buffer implementation.
@@ -18,10 +23,12 @@ type OutputAnalyzer interface {
 
 // OutputBuffer accumulates terminal output between idle events and
 // detects the current phase (compile/lint/test) from the content.
+// The buffer is capped at maxBufferSize to prevent memory exhaustion.
 type OutputBuffer struct {
-	mu    sync.Mutex
-	buf   strings.Builder
-	phase Phase
+	mu       sync.Mutex
+	buf      strings.Builder
+	phase    Phase
+	overflow bool
 }
 
 // NewOutputBuffer creates an empty output buffer.
@@ -34,10 +41,27 @@ func NewOutputBuffer() *OutputBuffer {
 // Write appends output data, stripping ANSI escape sequences, and
 // updates the detected phase. Phase detection is performed on cleaned
 // (ANSI-stripped) data to ensure consistency with buffer analysis.
+// If the buffer exceeds maxBufferSize, further writes are dropped and
+// overflow flag is set to prevent memory exhaustion.
 func (b *OutputBuffer) Write(data []byte) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+
+	// Check if we've already overflowed; if so, drop remaining data
+	if b.overflow {
+		slog.Warn("output buffer overflow, discarding data", "buf_size", b.buf.Len())
+		return
+	}
+
 	clean := StripANSI(data)
+
+	// Check if adding this data would exceed limit
+	if b.buf.Len()+len(clean) > maxBufferSize {
+		b.overflow = true
+		slog.Error("output buffer size limit exceeded", "limit", maxBufferSize, "current", b.buf.Len())
+		return
+	}
+
 	b.buf.Write(clean)
 
 	// Detect phase on cleaned data to ensure consistency with Analyze().
@@ -69,12 +93,13 @@ func (b *OutputBuffer) Analyze() GateResult {
 	return GateResult{Phase: b.phase, Result: result}
 }
 
-// Reset clears the buffer and resets the phase to unknown.
+// Reset clears the buffer, phase, and overflow flag.
 func (b *OutputBuffer) Reset() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.buf.Reset()
 	b.phase = PhaseUnknown
+	b.overflow = false
 }
 
 // String returns the accumulated output as a string.

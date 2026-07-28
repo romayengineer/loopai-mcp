@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -322,4 +323,60 @@ func TestOutputBufferConcurrentWrite(t *testing.T) {
 		_ = buf.String()
 	}
 	<-done
+}
+
+// TestOutputBufferSizeLimitProtection verifies that the buffer enforces
+// the maxBufferSize limit to prevent memory exhaustion attacks.
+func TestOutputBufferSizeLimitProtection(t *testing.T) {
+	buf := NewOutputBuffer()
+
+	// Create data that's just under the limit
+	largeData := make([]byte, maxBufferSize-1000)
+	for i := 0; i < len(largeData); i++ {
+		largeData[i] = 'a'
+	}
+
+	buf.Write(largeData)
+	if buf.String() == "" {
+		t.Fatal("expected buffer to contain data before limit")
+	}
+
+	// Try to write data that would exceed the limit
+	buf.Write([]byte("x"))
+	buf.Write([]byte("y"))
+	buf.Write([]byte("z"))
+
+	// Buffer should still contain original data
+	if !strings.Contains(buf.String(), "a") {
+		t.Fatal("expected buffer to still contain original data after overflow")
+	}
+
+	// Reset should clear overflow flag
+	buf.Reset()
+	buf.Write([]byte("new data"))
+	if !strings.Contains(buf.String(), "new") {
+		t.Fatal("expected buffer to accept data after reset")
+	}
+}
+
+// TestOutputBufferOverflowDropsData verifies that writes after overflow
+// are silently dropped to prevent memory growth.
+func TestOutputBufferOverflowDropsData(t *testing.T) {
+	buf := NewOutputBuffer()
+
+	// Fill buffer to limit
+	for i := 0; i < 5; i++ {
+		buf.Write(make([]byte, maxBufferSize/5))
+	}
+
+	sizeBefore := buf.String()
+	lenBefore := len(sizeBefore)
+
+	// Try to write more data
+	buf.Write([]byte("this should be dropped"))
+
+	// Size should not have grown
+	if len(buf.String()) > lenBefore {
+		t.Errorf("buffer grew after overflow: %d -> %d", lenBefore, len(buf.String()))
+	}
 }

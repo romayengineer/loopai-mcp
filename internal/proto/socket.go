@@ -20,6 +20,9 @@ const (
 	// SocketFileMode is the permission mode for the socket file.
 	SocketFileMode    os.FileMode = 0600
 	socketDialTimeout             = 5 * time.Second
+	// maxMessageSize limits the size of a single message to prevent memory exhaustion.
+	// Typical messages are <100KB; 10MB is a generous limit.
+	maxMessageSize = 10 * 1024 * 1024
 )
 
 // DefaultSocketPath returns the default Unix socket path, using
@@ -85,11 +88,17 @@ type Conn struct {
 }
 
 // NewConn creates a Conn wrapping the given network connection.
+// The scanner is configured with maxMessageSize to prevent memory exhaustion
+// from maliciously large or corrupted messages.
 func NewConn(conn net.Conn) *Conn {
+	scanner := bufio.NewScanner(conn)
+	// Set buffer size limit: default 64KB is too small for large output chunks,
+	// but 10MB is a reasonable limit for typical compile/test output.
+	scanner.Buffer(make([]byte, 64*1024), maxMessageSize)
 	return &Conn{
 		conn:   conn,
 		writer: json.NewEncoder(conn),
-		reader: bufio.NewScanner(conn),
+		reader: scanner,
 	}
 }
 

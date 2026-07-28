@@ -1,5 +1,3 @@
-//go:build integration
-
 package main
 
 import (
@@ -16,6 +14,63 @@ import (
 	"github.com/romayengineer/loopai-mcp/internal/proto"
 )
 
+// Unit tests for validatePromptsDir
+func TestValidatePromptsDirSuccess(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	err := validatePromptsDir(tmpDir)
+	if err != nil {
+		t.Fatalf("expected no error for valid directory, got: %v", err)
+	}
+}
+
+func TestValidatePromptsDirNotExist(t *testing.T) {
+	err := validatePromptsDir("/nonexistent/path/that/does/not/exist")
+	if err == nil {
+		t.Fatal("expected error for nonexistent directory")
+	}
+}
+
+func TestValidatePromptsDirNotADirectory(t *testing.T) {
+	tmpFile := filepath.Join(t.TempDir(), "testfile")
+	if err := os.WriteFile(tmpFile, []byte("test"), 0644); err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+
+	err := validatePromptsDir(tmpFile)
+	if err == nil {
+		t.Fatal("expected error when path is a file")
+	}
+}
+
+func TestValidatePromptsDirEmpty(t *testing.T) {
+	tmpDir := t.TempDir()
+	// Directory is empty, but should still validate successfully
+	err := validatePromptsDir(tmpDir)
+	if err != nil {
+		t.Fatalf("expected no error for empty directory, got: %v", err)
+	}
+}
+
+func TestValidatePromptsDirWithFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create some mock prompt files
+	files := []string{"compile-fail.md", "compile-pass.md", "test-fail.md"}
+	for _, f := range files {
+		path := filepath.Join(tmpDir, f)
+		if err := os.WriteFile(path, []byte("prompt content"), 0644); err != nil {
+			t.Fatalf("setup failed: %v", err)
+		}
+	}
+
+	err := validatePromptsDir(tmpDir)
+	if err != nil {
+		t.Fatalf("expected no error for directory with files, got: %v", err)
+	}
+}
+
+// Integration tests
 func socketPath(t *testing.T, name string) string {
 	t.Helper()
 	path := "/tmp/loopai-cmd-test-" + name
@@ -179,11 +234,12 @@ func TestBackendStartStopIntegration(t *testing.T) {
 
 func TestBackendBinaryStartsAndAcceptsConnection(t *testing.T) {
 	sp := socketPath(t, "backend.sock")
+	promptDir := t.TempDir()
 
 	// Temporarily replace os.Args to control flags
 	oldArgs := os.Args
 	defer func() { os.Args = oldArgs }()
-	os.Args = []string{"loopai-backend", "-socket", sp}
+	os.Args = []string{"loopai-backend", "-socket", sp, "-prompts-dir", promptDir}
 
 	// Start backend in a goroutine
 	done := make(chan struct{})

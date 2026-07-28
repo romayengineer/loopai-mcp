@@ -105,9 +105,11 @@ func main() {
 		Client: *client,
 	})
 	if err != nil {
-		slog.Warn("marshal started", "error", err)
+		slog.Warn("marshal started message", "error", err)
 	} else if err := pc.Send(ctx, msg); err != nil {
-		slog.Warn("send started", "error", err)
+		slog.Warn("send started message to backend", "client", *client, "pid", proc.PID(), "error", err)
+	} else {
+		slog.Debug("startup message sent", "client", *client, "pid", proc.PID())
 	}
 
 	idle := launcher.NewIdleDetector(*idleTimeout, func() {

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -42,6 +43,12 @@ func main() {
 		return
 	}
 
+	// Validate prompts directory exists and is readable before starting backend
+	if err := validatePromptsDir(*promptsDir); err != nil {
+		slog.Error("prompts directory validation", "path", *promptsDir, "error", err)
+		os.Exit(1)
+	}
+
 	if err := checkAndWritePID(*socketPath); err != nil {
 		slog.Error("pid check", "error", err)
 		os.Exit(1)
@@ -67,4 +74,28 @@ func main() {
 		slog.Error("backend", "error", err)
 		os.Exit(1)
 	}
+}
+
+// validatePromptsDir checks that the prompts directory exists and is readable.
+// This prevents startup failures when enforcing phases.
+func validatePromptsDir(dir string) error {
+	info, err := os.Stat(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("prompts directory not found: %s (create it or use -prompts-dir flag)", dir)
+		}
+		return fmt.Errorf("cannot access prompts directory: %w", err)
+	}
+
+	if !info.IsDir() {
+		return fmt.Errorf("prompts path is not a directory: %s", dir)
+	}
+
+	// Try to read directory to verify permissions
+	if _, err := os.ReadDir(dir); err != nil {
+		return fmt.Errorf("cannot read prompts directory: %w", err)
+	}
+
+	slog.Debug("prompts directory validated", "path", dir)
+	return nil
 }

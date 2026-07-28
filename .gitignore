@@ -1,4 +1,5 @@
-IMPROVEMENTS.md
+# I`ll manually add .md files
+*.md
 
 # Go binaries
 *.exe
