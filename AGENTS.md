@@ -72,6 +72,20 @@ Root-level `make` (or `task`) orchestrates all sub-projects. Fill in exact comma
   - **Integration tests** — test real I/O (sockets, PTY, process spawning). Do NOT mock the OS. Stored in `*_integration_test.go` with `//go:build integration` build tag. Run with `go test -tags=integration`.
 - **Every new feature or bugfix must include both unit and integration tests.** The integration test validates the real end-to-end path; the unit test validates edge cases around it.
 
+## Go style and best practices
+
+- **Shared state** — use `sync/atomic` (not `sync.Mutex`) for single-word values shared across goroutines. No naked fields read/written from multiple goroutines.
+- **Structured logging** — use `log/slog` (`slog.Info`, `slog.Warn`, `slog.Error`, `slog.Debug`) with attrs. Not `log.Printf`.
+- **Error wrapping** — use `fmt.Errorf("context: %w", err)` everywhere. Never `%v` or `%s` for error wrapping.
+- **Context propagation** — pass `context.Context` as the first argument to any function that blocks (socket ops, accept loops, handlers). Check `ctx.Done()` in select statements for cancellation.
+- **Constants over magic numbers** — every bare literal that is not 0, 1, or a simple counter must be a named constant. Buffer sizes, timeouts, permissions, dimensions.
+- **Check all errors** — `Close()`, `Write()`, `Send()`, `Signal()`, `Kill()`, `MkdirAll()`, `Chmod()`, `Unmarshal()` — all of them. Every unchecked error is a bug waiting to happen.
+- **Non-main packages never use `log.Fatal` or `panic`** — return errors to the caller.
+- **gofmt -s** — run `gofmt -s -w .` before every commit. Pre-commit hook enforces this.
+- **golangci-lint** — config in `.golangci.yml`. Run `golangci-lint run ./...` before pushing.
+- **CI** — defines three gates: `golangci-lint`, `go vet` + unit tests, and integration tests. All three must pass before merging.
+- **Pre-commit hook** — installed via `make install-hooks`. Runs `gofmt -s`, `go vet`, unit tests.
+
 ## Open items
 
 - Exact terminal output state machine design
