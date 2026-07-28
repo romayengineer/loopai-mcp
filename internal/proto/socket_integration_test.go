@@ -3,12 +3,15 @@
 package proto_test
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"testing"
 
 	"github.com/romayengineer/loopai-mcp/internal/proto"
 )
+
+var bg = context.Background()
 
 func socketPath(t *testing.T, name string) string {
 	t.Helper()
@@ -42,12 +45,15 @@ func TestSocketListenConnectRoundTrip(t *testing.T) {
 	clientSide := proto.NewConn(conn)
 	serverSide := proto.NewConn(serverConn)
 
-	sendMsg := proto.NewMessage(proto.MsgStarted, proto.StartedPayload{Pid: 100, Client: "test"})
-	if err := clientSide.Send(sendMsg); err != nil {
+	sendMsg, err := proto.NewMessage(proto.MsgStarted, proto.StartedPayload{Pid: 100, Client: "test"})
+	if err != nil {
+		t.Fatalf("new message: %v", err)
+	}
+	if err := clientSide.Send(bg, sendMsg); err != nil {
 		t.Fatalf("client send: %v", err)
 	}
 
-	recvMsg, err := serverSide.Receive()
+	recvMsg, err := serverSide.Receive(bg)
 	if err != nil {
 		t.Fatalf("server receive: %v", err)
 	}
@@ -62,12 +68,15 @@ func TestSocketListenConnectRoundTrip(t *testing.T) {
 		t.Fatalf("unexpected payload: %+v", p)
 	}
 
-	reply := proto.NewMessage(proto.MsgType, proto.TypePayload{Text: "hello"})
-	if err := serverSide.Send(reply); err != nil {
+	reply, err := proto.NewMessage(proto.MsgType, proto.TypePayload{Text: "hello"})
+	if err != nil {
+		t.Fatalf("new message: %v", err)
+	}
+	if err := serverSide.Send(bg, reply); err != nil {
 		t.Fatalf("server send: %v", err)
 	}
 
-	recv2, err := clientSide.Receive()
+	recv2, err := clientSide.Receive(bg)
 	if err != nil {
 		t.Fatalf("client receive: %v", err)
 	}
@@ -100,21 +109,32 @@ func TestSocketMultipleMessages(t *testing.T) {
 	client := proto.NewConn(conn)
 	server := proto.NewConn(sc)
 
-	messages := []proto.Message{
-		proto.NewMessage(proto.MsgOutput, proto.OutputPayload{Data: []byte("line1\n")}),
-		proto.NewMessage(proto.MsgOutput, proto.OutputPayload{Data: []byte("line2\n")}),
-		proto.NewMessage(proto.MsgIdle, proto.IdlePayload{}),
-		proto.NewMessage(proto.MsgExited, proto.ExitedPayload{Code: 0}),
+	rawMessages := []struct {
+		t   proto.MessageType
+		pay interface{}
+	}{
+		{proto.MsgOutput, proto.OutputPayload{Data: []byte("line1\n")}},
+		{proto.MsgOutput, proto.OutputPayload{Data: []byte("line2\n")}},
+		{proto.MsgIdle, proto.IdlePayload{}},
+		{proto.MsgExited, proto.ExitedPayload{Code: 0}},
+	}
+	messages := make([]proto.Message, len(rawMessages))
+	for i, r := range rawMessages {
+		msg, err := proto.NewMessage(r.t, r.pay)
+		if err != nil {
+			t.Fatalf("new message #%d: %v", i, err)
+		}
+		messages[i] = msg
 	}
 
 	for _, msg := range messages {
-		if err := client.Send(msg); err != nil {
+		if err := client.Send(bg, msg); err != nil {
 			t.Fatalf("send: %v", err)
 		}
 	}
 
 	for i, expected := range messages {
-		received, err := server.Receive()
+		received, err := server.Receive(bg)
 		if err != nil {
 			t.Fatalf("receive #%d: %v", i, err)
 		}
@@ -175,12 +195,15 @@ func TestSocketBinaryPayload(t *testing.T) {
 	server := proto.NewConn(sc)
 
 	binaryData := []byte{0x00, 0x01, 0x02, 0xFE, 0xFF}
-	msg := proto.NewMessage(proto.MsgOutput, proto.OutputPayload{Data: binaryData})
-	if err := client.Send(msg); err != nil {
+	msg, err := proto.NewMessage(proto.MsgOutput, proto.OutputPayload{Data: binaryData})
+	if err != nil {
+		t.Fatalf("new message: %v", err)
+	}
+	if err := client.Send(bg, msg); err != nil {
 		t.Fatalf("send: %v", err)
 	}
 
-	recv, err := server.Receive()
+	recv, err := server.Receive(bg)
 	if err != nil {
 		t.Fatalf("receive: %v", err)
 	}

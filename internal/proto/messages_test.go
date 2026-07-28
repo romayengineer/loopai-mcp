@@ -8,7 +8,10 @@ import (
 )
 
 func TestNewMessage(t *testing.T) {
-	msg := proto.NewMessage(proto.MsgStarted, proto.StartedPayload{Pid: 42, Client: "claude"})
+	msg, err := proto.NewMessage(proto.MsgStarted, proto.StartedPayload{Pid: 42, Client: "claude"})
+	if err != nil {
+		t.Fatalf("new message: %v", err)
+	}
 	if msg.Type != proto.MsgStarted {
 		t.Fatalf("expected type %q, got %q", proto.MsgStarted, msg.Type)
 	}
@@ -25,14 +28,20 @@ func TestNewMessage(t *testing.T) {
 }
 
 func TestNewMessageNilPayload(t *testing.T) {
-	msg := proto.NewMessage(proto.MsgIdle, proto.IdlePayload{})
+	msg, err := proto.NewMessage(proto.MsgIdle, proto.IdlePayload{})
+	if err != nil {
+		t.Fatalf("new message: %v", err)
+	}
 	if msg.Type != proto.MsgIdle {
 		t.Fatalf("expected type %q, got %q", proto.MsgIdle, msg.Type)
 	}
 }
 
 func TestMessageRoundTrip(t *testing.T) {
-	orig := proto.NewMessage(proto.MsgOutput, proto.OutputPayload{Data: []byte("hello\nworld\n")})
+	orig, err := proto.NewMessage(proto.MsgOutput, proto.OutputPayload{Data: []byte("hello\nworld\n")})
+	if err != nil {
+		t.Fatalf("new message: %v", err)
+	}
 	b, err := json.Marshal(orig)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -99,7 +108,10 @@ func TestMessageJSONStructure(t *testing.T) {
 }
 
 func TestExitedPayload(t *testing.T) {
-	msg := proto.NewMessage(proto.MsgExited, proto.ExitedPayload{Code: 1, Signal: "SIGTERM"})
+	msg, err := proto.NewMessage(proto.MsgExited, proto.ExitedPayload{Code: 1, Signal: "SIGTERM"})
+	if err != nil {
+		t.Fatalf("new message: %v", err)
+	}
 	if msg.Type != proto.MsgExited {
 		t.Fatalf("expected %q, got %q", proto.MsgExited, msg.Type)
 	}

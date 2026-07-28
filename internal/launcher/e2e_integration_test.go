@@ -52,10 +52,10 @@ func TestEndToEndEcho(t *testing.T) {
 		outputData string
 	)
 
-	handler := func(_ context.Context, pc *proto.Conn) {
+	handler := func(ctx context.Context, pc *proto.Conn) {
 		defer pc.Close()
 		for {
-			msg, err := pc.Receive()
+			msg, err := pc.Receive(ctx)
 			if err != nil {
 				return
 			}
@@ -68,7 +68,12 @@ func TestEndToEndEcho(t *testing.T) {
 					gotOutput = true
 				}
 			case proto.MsgIdle:
-				if err := pc.Send(proto.NewMessage(proto.MsgType, proto.TypePayload{Text: "done"})); err != nil {
+				reply, mErr := proto.NewMessage(proto.MsgType, proto.TypePayload{Text: "done"})
+				if mErr != nil {
+					mu.Unlock()
+					return
+				}
+				if err := pc.Send(ctx, reply); err != nil {
 					mu.Unlock()
 					return
 				}
@@ -104,22 +109,33 @@ func TestEndToEndEcho(t *testing.T) {
 		}
 	}()
 
-	if err := pc.Send(proto.NewMessage(proto.MsgStarted, proto.StartedPayload{
+	ctx := context.Background()
+
+	startMsg, err := proto.NewMessage(proto.MsgStarted, proto.StartedPayload{
 		Pid: proc.Cmd.Process.Pid, Client: "echo",
-	})); err != nil {
+	})
+	if err != nil {
+		t.Fatalf("new message: %v", err)
+	}
+	if err := pc.Send(ctx, startMsg); err != nil {
 		t.Fatalf("send started: %v", err)
 	}
 
 	idle := NewIdleDetector(2*time.Second, func() {
-		if err := pc.Send(proto.NewMessage(proto.MsgIdle, proto.IdlePayload{})); err != nil {
+		idleMsg, mErr := proto.NewMessage(proto.MsgIdle, proto.IdlePayload{})
+		if mErr != nil {
+			t.Logf("marshal idle: %v", mErr)
+			return
+		}
+		if err := pc.Send(ctx, idleMsg); err != nil {
 			t.Logf("send idle: %v", err)
 		}
 	})
 	idle.Start()
 
 	errCh := make(chan error, 2)
-	go func() { errCh <- PipePTYToBackend(pc, proc, idle) }()
-	go func() { errCh <- PipeBackendToPTY(pc, proc) }()
+	go func() { errCh <- PipePTYToBackend(ctx, pc, proc, idle) }()
+	go func() { errCh <- PipeBackendToPTY(ctx, pc, proc) }()
 
 	<-errCh
 	idle.Stop()
@@ -127,7 +143,10 @@ func TestEndToEndEcho(t *testing.T) {
 	<-proc.Wait()
 	actualCode := proc.ExitCode()
 
-	if err := pc.Send(proto.NewMessage(proto.MsgExited, proto.ExitedPayload{Code: actualCode})); err != nil {
+	exitMsg, err := proto.NewMessage(proto.MsgExited, proto.ExitedPayload{Code: actualCode})
+	if err != nil {
+		t.Logf("marshal exited: %v", err)
+	} else if err := pc.Send(ctx, exitMsg); err != nil {
 		t.Logf("send exited: %v", err)
 	}
 
@@ -161,10 +180,10 @@ func TestEndToEndExitCode(t *testing.T) {
 		mu       sync.Mutex
 	)
 
-	handler := func(_ context.Context, pc *proto.Conn) {
+	handler := func(ctx context.Context, pc *proto.Conn) {
 		defer pc.Close()
 		for {
-			msg, err := pc.Receive()
+			msg, err := pc.Receive(ctx)
 			if err != nil {
 				return
 			}
@@ -189,6 +208,7 @@ func TestEndToEndExitCode(t *testing.T) {
 	}
 	defer conn.Close()
 	pc := proto.NewConn(conn)
+	ctx := context.Background()
 
 	proc, err := Spawn("sh", []string{"-c", "exit 42"})
 	if err != nil {
@@ -196,9 +216,13 @@ func TestEndToEndExitCode(t *testing.T) {
 	}
 	defer proc.Close()
 
-	if err := pc.Send(proto.NewMessage(proto.MsgStarted, proto.StartedPayload{
+	startMsg, err := proto.NewMessage(proto.MsgStarted, proto.StartedPayload{
 		Pid: proc.Cmd.Process.Pid, Client: "sh",
-	})); err != nil {
+	})
+	if err != nil {
+		t.Fatalf("new message: %v", err)
+	}
+	if err := pc.Send(ctx, startMsg); err != nil {
 		t.Fatalf("send started: %v", err)
 	}
 
@@ -206,15 +230,18 @@ func TestEndToEndExitCode(t *testing.T) {
 	idle.Start()
 
 	errCh := make(chan error, 2)
-	go func() { errCh <- PipePTYToBackend(pc, proc, idle) }()
-	go func() { errCh <- PipeBackendToPTY(pc, proc) }()
+	go func() { errCh <- PipePTYToBackend(ctx, pc, proc, idle) }()
+	go func() { errCh <- PipeBackendToPTY(ctx, pc, proc) }()
 
 	<-errCh
 	idle.Stop()
 	<-proc.Wait()
 
 	code := proc.ExitCode()
-	if err := pc.Send(proto.NewMessage(proto.MsgExited, proto.ExitedPayload{Code: code})); err != nil {
+	exitMsg, err := proto.NewMessage(proto.MsgExited, proto.ExitedPayload{Code: code})
+	if err != nil {
+		t.Logf("marshal exited: %v", err)
+	} else if err := pc.Send(ctx, exitMsg); err != nil {
 		t.Logf("send exited: %v", err)
 	}
 
@@ -236,10 +263,10 @@ func TestEndToEndOutputStreaming(t *testing.T) {
 	var outputChunks []string
 	var mu sync.Mutex
 
-	handler := func(_ context.Context, pc *proto.Conn) {
+	handler := func(ctx context.Context, pc *proto.Conn) {
 		defer pc.Close()
 		for {
-			msg, err := pc.Receive()
+			msg, err := pc.Receive(ctx)
 			if err != nil {
 				return
 			}
@@ -266,6 +293,7 @@ func TestEndToEndOutputStreaming(t *testing.T) {
 	}
 	defer conn.Close()
 	pc := proto.NewConn(conn)
+	ctx := context.Background()
 
 	proc, err := Spawn("sh", []string{"-c", "echo line1 && echo line2 && echo line3"})
 	if err != nil {
@@ -273,9 +301,13 @@ func TestEndToEndOutputStreaming(t *testing.T) {
 	}
 	defer proc.Close()
 
-	if err := pc.Send(proto.NewMessage(proto.MsgStarted, proto.StartedPayload{
+	startMsg, err := proto.NewMessage(proto.MsgStarted, proto.StartedPayload{
 		Pid: proc.Cmd.Process.Pid, Client: "sh",
-	})); err != nil {
+	})
+	if err != nil {
+		t.Fatalf("new message: %v", err)
+	}
+	if err := pc.Send(ctx, startMsg); err != nil {
 		t.Fatalf("send started: %v", err)
 	}
 
@@ -283,15 +315,18 @@ func TestEndToEndOutputStreaming(t *testing.T) {
 	idle.Start()
 
 	errCh := make(chan error, 2)
-	go func() { errCh <- PipePTYToBackend(pc, proc, idle) }()
-	go func() { errCh <- PipeBackendToPTY(pc, proc) }()
+	go func() { errCh <- PipePTYToBackend(ctx, pc, proc, idle) }()
+	go func() { errCh <- PipeBackendToPTY(ctx, pc, proc) }()
 
 	<-errCh
 	idle.Stop()
 	<-proc.Wait()
 
 	code := proc.ExitCode()
-	if err := pc.Send(proto.NewMessage(proto.MsgExited, proto.ExitedPayload{Code: code})); err != nil {
+	exitMsg, err := proto.NewMessage(proto.MsgExited, proto.ExitedPayload{Code: code})
+	if err != nil {
+		t.Logf("marshal exited: %v", err)
+	} else if err := pc.Send(ctx, exitMsg); err != nil {
 		t.Logf("send exited: %v", err)
 	}
 

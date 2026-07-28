@@ -1,8 +1,8 @@
 package main
 
 import (
+	"context"
 	"flag"
-	"fmt"
 	"log/slog"
 	"os"
 	"time"
@@ -11,10 +11,12 @@ import (
 	"github.com/romayengineer/loopai-mcp/internal/proto"
 )
 
+const defaultIdleTimeout = 5 * time.Second
+
 func main() {
 	client := flag.String("client", defaultClient(), "client binary to spawn (claude, opencode, etc.)")
 	socketPath := flag.String("socket", proto.DefaultSocketPath(), "unix socket path")
-	idleTimeout := flag.Duration("idle", 5*time.Second, "idle timeout before signaling backend")
+	idleTimeout := flag.Duration("idle", defaultIdleTimeout, "idle timeout before signaling backend")
 	flag.Parse()
 
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
@@ -39,15 +41,25 @@ func main() {
 	}
 	defer proc.Close()
 
-	if err := pc.Send(proto.NewMessage(proto.MsgStarted, proto.StartedPayload{
+	ctx := context.Background()
+
+	msg, err := proto.NewMessage(proto.MsgStarted, proto.StartedPayload{
 		Pid:    proc.Cmd.Process.Pid,
 		Client: *client,
-	})); err != nil {
+	})
+	if err != nil {
+		slog.Warn("marshal started", "error", err)
+	} else if err := pc.Send(ctx, msg); err != nil {
 		slog.Warn("send started", "error", err)
 	}
 
 	idle := launcher.NewIdleDetector(*idleTimeout, func() {
-		if err := pc.Send(proto.NewMessage(proto.MsgIdle, proto.IdlePayload{})); err != nil {
+		msg, mErr := proto.NewMessage(proto.MsgIdle, proto.IdlePayload{})
+		if mErr != nil {
+			slog.Warn("marshal idle", "error", mErr)
+			return
+		}
+		if err := pc.Send(ctx, msg); err != nil {
 			slog.Warn("send idle", "error", err)
 		}
 	})
@@ -55,11 +67,11 @@ func main() {
 
 	errCh := make(chan error, 2)
 	go func() {
-		err := launcher.PipePTYToBackend(pc, proc, idle)
+		err := launcher.PipePTYToBackend(ctx, pc, proc, idle)
 		errCh <- err
 	}()
 	go func() {
-		err := launcher.PipeBackendToPTY(pc, proc)
+		err := launcher.PipeBackendToPTY(ctx, pc, proc)
 		errCh <- err
 	}()
 
@@ -69,14 +81,17 @@ func main() {
 	<-proc.Wait()
 	exitCode := proc.ExitCode()
 
-	if err := pc.Send(proto.NewMessage(proto.MsgExited, proto.ExitedPayload{
+	msg, err = proto.NewMessage(proto.MsgExited, proto.ExitedPayload{
 		Code: exitCode,
-	})); err != nil {
+	})
+	if err != nil {
+		slog.Warn("marshal exited", "error", err)
+	} else if err := pc.Send(ctx, msg); err != nil {
 		slog.Warn("send exited", "error", err)
 	}
 
 	if exitCode != 0 {
-		fmt.Fprintf(os.Stderr, "client exited with code %d\n", exitCode)
+		slog.Warn("client exited", "code", exitCode)
 		os.Exit(exitCode)
 	}
 }

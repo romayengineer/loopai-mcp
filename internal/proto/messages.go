@@ -3,7 +3,11 @@
 // Messages are newline-delimited JSON.
 package proto
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+	"log/slog"
+)
 
 type MessageType string
 
@@ -22,12 +26,13 @@ type Message struct {
 	Payload json.RawMessage `json:"payload,omitempty"`
 }
 
-func NewMessage(typ MessageType, v interface{}) Message {
+func NewMessage(typ MessageType, v interface{}) (Message, error) {
 	b, err := json.Marshal(v)
 	if err != nil {
-		return Message{Type: typ}
+		slog.Warn("marshal message payload", "type", typ, "error", err)
+		return Message{Type: typ}, fmt.Errorf("marshal %s payload: %w", typ, err)
 	}
-	return Message{Type: typ, Payload: b}
+	return Message{Type: typ, Payload: b}, nil
 }
 
 type OutputPayload struct {

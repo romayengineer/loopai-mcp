@@ -40,9 +40,9 @@ func TestBackendAcceptsLauncher(t *testing.T) {
 	sp := socketPath(t, "accept.sock")
 
 	var started atomic.Bool
-	handler := func(_ context.Context, pc *proto.Conn) {
+	handler := func(ctx context.Context, pc *proto.Conn) {
 		defer pc.Close()
-		msg, err := pc.Receive()
+		msg, err := pc.Receive(ctx)
 		if err != nil {
 			t.Errorf("receive: %v", err)
 			return
@@ -52,7 +52,12 @@ func TestBackendAcceptsLauncher(t *testing.T) {
 		}
 		started.Store(true)
 
-		if err := pc.Send(proto.NewMessage(proto.MsgType, proto.TypePayload{Text: "hello"})); err != nil {
+		reply, mErr := proto.NewMessage(proto.MsgType, proto.TypePayload{Text: "hello"})
+		if mErr != nil {
+			t.Errorf("new message: %v", mErr)
+			return
+		}
+		if err := pc.Send(ctx, reply); err != nil {
 			t.Errorf("send reply: %v", err)
 		}
 	}
@@ -66,11 +71,16 @@ func TestBackendAcceptsLauncher(t *testing.T) {
 	defer conn.Close()
 
 	pc := proto.NewConn(conn)
-	if err := pc.Send(proto.NewMessage(proto.MsgStarted, proto.StartedPayload{Pid: 1, Client: "test"})); err != nil {
+	ctx := context.Background()
+	sendMsg, err := proto.NewMessage(proto.MsgStarted, proto.StartedPayload{Pid: 1, Client: "test"})
+	if err != nil {
+		t.Fatalf("new message: %v", err)
+	}
+	if err := pc.Send(ctx, sendMsg); err != nil {
 		t.Fatalf("send started: %v", err)
 	}
 
-	msg, err := pc.Receive()
+	msg, err := pc.Receive(ctx)
 	if err != nil {
 		t.Fatalf("receive reply: %v", err)
 	}
@@ -86,10 +96,10 @@ func TestBackendAcceptsLauncher(t *testing.T) {
 func TestBackendFullExchange(t *testing.T) {
 	sp := socketPath(t, "full.sock")
 
-	handler := func(_ context.Context, pc *proto.Conn) {
+	handler := func(ctx context.Context, pc *proto.Conn) {
 		defer pc.Close()
 		for {
-			msg, err := pc.Receive()
+			msg, err := pc.Receive(ctx)
 			if err != nil {
 				return
 			}
@@ -108,15 +118,28 @@ func TestBackendFullExchange(t *testing.T) {
 	defer conn.Close()
 
 	pc := proto.NewConn(conn)
+	ctx := context.Background()
 
 	send := func(msg proto.Message) {
-		if err := pc.Send(msg); err != nil {
+		if err := pc.Send(ctx, msg); err != nil {
 			t.Errorf("send: %v", err)
 		}
 	}
 
-	send(proto.NewMessage(proto.MsgStarted, proto.StartedPayload{Pid: 1, Client: "test"}))
-	send(proto.NewMessage(proto.MsgOutput, proto.OutputPayload{Data: []byte("test output\n")}))
-	send(proto.NewMessage(proto.MsgIdle, proto.IdlePayload{}))
-	send(proto.NewMessage(proto.MsgExited, proto.ExitedPayload{Code: 0}))
+	msgs := []struct {
+		t   proto.MessageType
+		pay interface{}
+	}{
+		{proto.MsgStarted, proto.StartedPayload{Pid: 1, Client: "test"}},
+		{proto.MsgOutput, proto.OutputPayload{Data: []byte("test output\n")}},
+		{proto.MsgIdle, proto.IdlePayload{}},
+		{proto.MsgExited, proto.ExitedPayload{Code: 0}},
+	}
+	for _, m := range msgs {
+		msg, mErr := proto.NewMessage(m.t, m.pay)
+		if mErr != nil {
+			t.Fatalf("new message: %v", mErr)
+		}
+		send(msg)
+	}
 }

@@ -37,7 +37,7 @@ func HandleLauncher(ctx context.Context, pc *proto.Conn) {
 		default:
 		}
 
-		msg, err := pc.Receive()
+		msg, err := pc.Receive(ctx)
 		if err != nil {
 			slog.Debug("launcher disconnected", "error", err)
 			return
@@ -53,7 +53,7 @@ func HandleLauncher(ctx context.Context, pc *proto.Conn) {
 			gate.handleOutput(p.Data)
 
 		case proto.MsgIdle:
-			gate.handleIdle(pc)
+			gate.handleIdle(ctx, pc)
 
 		case proto.MsgExited:
 			var p proto.ExitedPayload
@@ -82,7 +82,7 @@ func (g *Gate) handleOutput(data []byte) {
 	g.output.Write(data)
 }
 
-func (g *Gate) handleIdle(pc *proto.Conn) {
+func (g *Gate) handleIdle(ctx context.Context, pc *proto.Conn) {
 	result := g.output.Analyze()
 	phase := result.Phase
 	res := result.Result
@@ -94,9 +94,14 @@ func (g *Gate) handleIdle(pc *proto.Conn) {
 	)
 
 	send := func(text string) {
-		if err := pc.Send(proto.NewMessage(proto.MsgType, proto.TypePayload{
+		msg, mErr := proto.NewMessage(proto.MsgType, proto.TypePayload{
 			Text: text,
-		})); err != nil {
+		})
+		if mErr != nil {
+			slog.Warn("marshal message", "error", mErr)
+			return
+		}
+		if err := pc.Send(ctx, msg); err != nil {
 			slog.Warn("send failed", "error", err)
 		}
 	}

@@ -7,7 +7,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"time"
+)
+
+const (
+	readBufSize                 = 65536
+	captureDirMode  os.FileMode = 0755
+	captureFileMode os.FileMode = 0644
 )
 
 func main() {
@@ -49,59 +56,96 @@ func main() {
 		os.Exit(1)
 	}
 
-	var captured []byte
-	buf := make([]byte, 65536)
-	done := make(chan struct{})
+	var (
+		mu       sync.Mutex
+		captured []byte
+		wg       sync.WaitGroup
+	)
 
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
+		buf := make([]byte, readBufSize)
 		for {
 			n, err := stdout.Read(buf)
 			if n > 0 {
-				captured = append(captured, buf[:n]...)
-				os.Stdout.Write(buf[:n])
+				chunk := make([]byte, n)
+				copy(chunk, buf[:n])
+				mu.Lock()
+				captured = append(captured, chunk...)
+				mu.Unlock()
+				if _, wErr := os.Stdout.Write(chunk); wErr != nil {
+					slog.Warn("stdout write", "error", wErr)
+				}
 			}
 			if err != nil {
-				break
+				return
 			}
 		}
-		close(done)
 	}()
 
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
+		buf := make([]byte, readBufSize)
 		for {
 			n, err := stderr.Read(buf)
 			if n > 0 {
-				captured = append(captured, buf[:n]...)
-				os.Stderr.Write(buf[:n])
+				chunk := make([]byte, n)
+				copy(chunk, buf[:n])
+				mu.Lock()
+				captured = append(captured, chunk...)
+				mu.Unlock()
+				if _, wErr := os.Stderr.Write(chunk); wErr != nil {
+					slog.Warn("stderr write", "error", wErr)
+				}
 			}
 			if err != nil {
-				break
+				return
 			}
 		}
+	}()
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
 	}()
 
 	select {
 	case <-done:
 	case <-time.After(*duration):
-		cmd.Process.Kill()
+		if err := cmd.Process.Kill(); err != nil {
+			slog.Warn("kill process", "error", err)
+		}
+		wg.Wait()
 	}
 
-	cmd.Wait()
+	if err := cmd.Wait(); err != nil {
+		slog.Warn("process wait", "error", err)
+	}
 
 	outPath := *outputFile
 	if outPath == "" {
-		_ = os.MkdirAll("testdata", 0755)
+		if err := os.MkdirAll("testdata", captureDirMode); err != nil {
+			slog.Error("create testdata dir", "error", err)
+			os.Exit(1)
+		}
 		outPath = fmt.Sprintf("testdata/capture-%d.raw", time.Now().Unix())
 	}
-	// Make path relative to repo root
-	fullPath := outPath
-	if !filepath.IsAbs(outPath) {
-		fullPath = filepath.Join("/Users/macbookpro/Projects/romayengineer/loopai-mcp", outPath)
+
+	if err := os.MkdirAll(filepath.Dir(outPath), captureDirMode); err != nil {
+		slog.Error("create output dir", "error", err)
+		os.Exit(1)
 	}
-	os.MkdirAll(filepath.Dir(fullPath), 0755)
-	if err := os.WriteFile(fullPath, captured, 0644); err != nil {
+	if err := os.WriteFile(outPath, captured, captureFileMode); err != nil {
 		slog.Error("write capture", "error", err)
 		os.Exit(1)
 	}
-	slog.Info("captured output", "file", outPath, "bytes", len(captured))
+	// Verify the file was written
+	if info, err := os.Stat(outPath); err != nil {
+		slog.Warn("stat capture file", "error", err)
+	} else {
+		slog.Info("captured output", "file", outPath, "bytes", info.Size())
+	}
 }

@@ -58,7 +58,7 @@ func startLoopHarness(t *testing.T, ctx context.Context, socketPath string, hand
 	go func() {
 		defer close(h.done)
 		for {
-			msg, err := pc.Receive()
+			msg, err := pc.Receive(ctx)
 			if err != nil {
 				return
 			}
@@ -79,19 +79,31 @@ func startLoopHarness(t *testing.T, ctx context.Context, socketPath string, hand
 }
 
 func (h *loopHarness) sendStarted() {
-	if err := h.pc.Send(proto.NewMessage(proto.MsgStarted, proto.StartedPayload{Pid: 1, Client: "test"})); err != nil {
+	msg, err := proto.NewMessage(proto.MsgStarted, proto.StartedPayload{Pid: 1, Client: "test"})
+	if err != nil {
+		h.t.Fatalf("new message: %v", err)
+	}
+	if err := h.pc.Send(context.Background(), msg); err != nil {
 		h.t.Fatalf("send started: %v", err)
 	}
 }
 
 func (h *loopHarness) sendOutput(data string) {
-	if err := h.pc.Send(proto.NewMessage(proto.MsgOutput, proto.OutputPayload{Data: []byte(data)})); err != nil {
+	msg, err := proto.NewMessage(proto.MsgOutput, proto.OutputPayload{Data: []byte(data)})
+	if err != nil {
+		h.t.Fatalf("new message: %v", err)
+	}
+	if err := h.pc.Send(context.Background(), msg); err != nil {
 		h.t.Fatalf("send output: %v", err)
 	}
 }
 
 func (h *loopHarness) sendIdle() {
-	if err := h.pc.Send(proto.NewMessage(proto.MsgIdle, proto.IdlePayload{})); err != nil {
+	msg, err := proto.NewMessage(proto.MsgIdle, proto.IdlePayload{})
+	if err != nil {
+		h.t.Fatalf("new message: %v", err)
+	}
+	if err := h.pc.Send(context.Background(), msg); err != nil {
 		h.t.Fatalf("send idle: %v", err)
 	}
 }

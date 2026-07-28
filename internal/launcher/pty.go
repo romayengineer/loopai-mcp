@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -88,18 +89,27 @@ func forwardSignals(cmd *exec.Cmd, done <-chan struct{}) {
 	select {
 	case sig := <-sigCh:
 		if cmd.Process != nil {
-			cmd.Process.Signal(sig)
+			if err := cmd.Process.Signal(sig); err != nil {
+				slog.Warn("forward signal", "signal", sig, "error", err)
+			}
 		}
 	case <-done:
 	}
 }
 
 func (p *PtyProcess) Resize(rows, cols uint16) error {
-	return pty.Setsize(p.PTY, &pty.Winsize{Rows: rows, Cols: cols})
+	if err := pty.Setsize(p.PTY, &pty.Winsize{Rows: rows, Cols: cols}); err != nil {
+		return fmt.Errorf("resize PTY: %w", err)
+	}
+	return nil
 }
 
 func (p *PtyProcess) Write(data []byte) (int, error) {
-	return p.PTY.Write(data)
+	n, err := p.PTY.Write(data)
+	if err != nil {
+		return n, fmt.Errorf("write PTY: %w", err)
+	}
+	return n, nil
 }
 
 func (p *PtyProcess) Read(buf []byte) (int, error) {
@@ -113,7 +123,10 @@ func (p *PtyProcess) Read(buf []byte) (int, error) {
 }
 
 func (p *PtyProcess) Signal(sig os.Signal) error {
-	return p.Cmd.Process.Signal(sig)
+	if err := p.Cmd.Process.Signal(sig); err != nil {
+		return fmt.Errorf("signal %s: %w", sig, err)
+	}
+	return nil
 }
 
 func (p *PtyProcess) Wait() <-chan struct{} {
@@ -133,7 +146,7 @@ func (p *PtyProcess) Close() error {
 	default:
 		if p.Cmd.Process != nil {
 			if err := p.Cmd.Process.Kill(); err != nil && closeErr == nil {
-				closeErr = err
+				closeErr = fmt.Errorf("kill: %w", err)
 			}
 		}
 	}
@@ -143,5 +156,8 @@ func (p *PtyProcess) Close() error {
 	case <-time.After(ptyCloseTimeout):
 	}
 
-	return closeErr
+	if closeErr != nil {
+		return fmt.Errorf("close PTY: %w", closeErr)
+	}
+	return nil
 }

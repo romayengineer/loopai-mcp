@@ -2,6 +2,7 @@ package proto
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -46,7 +47,9 @@ func Listen(socketPath string) (net.Listener, error) {
 		return nil, fmt.Errorf("listen on %s: %w", socketPath, err)
 	}
 	if err := os.Chmod(socketPath, SocketFileMode); err != nil {
-		ln.Close()
+		if closeErr := ln.Close(); closeErr != nil {
+			err = fmt.Errorf("chmod socket: %w (close: %v)", err, closeErr)
+		}
 		return nil, fmt.Errorf("chmod socket: %w", err)
 	}
 	return ln, nil
@@ -74,11 +77,21 @@ func NewConn(conn net.Conn) *Conn {
 	}
 }
 
-func (c *Conn) Send(msg Message) error {
+func (c *Conn) Send(ctx context.Context, msg Message) error {
+	if deadline, ok := ctx.Deadline(); ok {
+		if err := c.conn.SetWriteDeadline(deadline); err != nil {
+			return fmt.Errorf("set write deadline: %w", err)
+		}
+	}
 	return c.writer.Encode(msg)
 }
 
-func (c *Conn) Receive() (Message, error) {
+func (c *Conn) Receive(ctx context.Context) (Message, error) {
+	if deadline, ok := ctx.Deadline(); ok {
+		if err := c.conn.SetReadDeadline(deadline); err != nil {
+			return Message{}, fmt.Errorf("set read deadline: %w", err)
+		}
+	}
 	if !c.reader.Scan() {
 		if err := c.reader.Err(); err != nil {
 			return Message{}, err

@@ -1,7 +1,9 @@
 package launcher
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -11,33 +13,48 @@ import (
 
 const readBufSize = 65536
 
-func PipePTYToBackend(pc *proto.Conn, proc *PtyProcess, idle *IdleDetector) error {
+func PipePTYToBackend(ctx context.Context, pc *proto.Conn, proc *PtyProcess, idle *IdleDetector) error {
 	buf := make([]byte, readBufSize)
 	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
 		n, err := proc.Read(buf)
 		if n > 0 {
 			idle.Reset()
 			data := make([]byte, n)
 			copy(data, buf[:n])
-			msg := proto.NewMessage(proto.MsgOutput, proto.OutputPayload{Data: data})
-			if err := pc.Send(msg); err != nil {
-				return err
+			msg, err := proto.NewMessage(proto.MsgOutput, proto.OutputPayload{Data: data})
+			if err != nil {
+				return fmt.Errorf("create output message: %w", err)
+			}
+			if err := pc.Send(ctx, msg); err != nil {
+				return fmt.Errorf("send output to backend: %w", err)
 			}
 		}
 		if err != nil {
 			if err == io.EOF {
 				return nil
 			}
-			return err
+			return fmt.Errorf("read from PTY: %w", err)
 		}
 	}
 }
 
-func PipeBackendToPTY(pc *proto.Conn, proc *PtyProcess) error {
+func PipeBackendToPTY(ctx context.Context, pc *proto.Conn, proc *PtyProcess) error {
 	for {
-		msg, err := pc.Receive()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		msg, err := pc.Receive(ctx)
 		if err != nil {
-			return err
+			return fmt.Errorf("receive from backend: %w", err)
 		}
 
 		switch msg.Type {
@@ -49,7 +66,7 @@ func PipeBackendToPTY(pc *proto.Conn, proc *PtyProcess) error {
 			}
 			input := []byte(p.Text + "\n")
 			if _, err := proc.Write(input); err != nil {
-				return err
+				return fmt.Errorf("write to PTY: %w", err)
 			}
 
 		case proto.MsgCtrlC:

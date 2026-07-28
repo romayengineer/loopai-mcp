@@ -5,6 +5,7 @@ package backend
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net"
 	"sync/atomic"
@@ -28,19 +29,25 @@ func New(socketPath string, handler func(context.Context, *proto.Conn)) *Backend
 func (b *Backend) Run(ctx context.Context) error {
 	ln, err := proto.Listen(b.socketPath)
 	if err != nil {
-		return err
+		return fmt.Errorf("listen: %w", err)
 	}
 	b.ln.Store(ln)
 
 	slog.Info("backend started", "socket", b.socketPath)
 
 	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+		}
+
 		conn, err := ln.Accept()
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil
 			}
-			return err
+			return fmt.Errorf("accept: %w", err)
 		}
 		slog.Info("launcher connected")
 		pc := proto.NewConn(conn)
@@ -50,6 +57,8 @@ func (b *Backend) Run(ctx context.Context) error {
 
 func (b *Backend) Stop() {
 	if v := b.ln.Load(); v != nil {
-		v.(net.Listener).Close()
+		if err := v.(net.Listener).Close(); err != nil {
+			slog.Warn("close listener", "error", err)
+		}
 	}
 }
