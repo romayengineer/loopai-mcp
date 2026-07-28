@@ -112,7 +112,7 @@ func TestEndToEndEcho(t *testing.T) {
 	ctx := context.Background()
 
 	startMsg, err := proto.NewMessage(proto.MsgStarted, proto.StartedPayload{
-		Pid: proc.Cmd.Process.Pid, Client: "echo",
+		Pid: proc.PID(), Client: "echo",
 	})
 	if err != nil {
 		t.Fatalf("new message: %v", err)
@@ -217,7 +217,7 @@ func TestEndToEndExitCode(t *testing.T) {
 	defer proc.Close()
 
 	startMsg, err := proto.NewMessage(proto.MsgStarted, proto.StartedPayload{
-		Pid: proc.Cmd.Process.Pid, Client: "sh",
+		Pid: proc.PID(), Client: "sh",
 	})
 	if err != nil {
 		t.Fatalf("new message: %v", err)
@@ -302,7 +302,7 @@ func TestEndToEndOutputStreaming(t *testing.T) {
 	defer proc.Close()
 
 	startMsg, err := proto.NewMessage(proto.MsgStarted, proto.StartedPayload{
-		Pid: proc.Cmd.Process.Pid, Client: "sh",
+		Pid: proc.PID(), Client: "sh",
 	})
 	if err != nil {
 		t.Fatalf("new message: %v", err)

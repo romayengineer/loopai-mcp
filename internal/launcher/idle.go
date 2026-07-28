@@ -7,6 +7,14 @@ import (
 	"time"
 )
 
+// IdleTimer is the interface for an idle detector that can be started,
+// reset (to extend the idle window), and stopped.
+type IdleTimer interface {
+	Start()
+	Stop()
+	Reset()
+}
+
 // IdleDetector fires a callback after a configurable period of inactivity.
 // Reset can be called to extend the idle window (e.g. on each byte of output).
 type IdleDetector struct {
@@ -19,7 +27,7 @@ type IdleDetector struct {
 
 // NewIdleDetector creates an idle detector that calls onIdle after
 // the given timeout without a Reset call.
-func NewIdleDetector(timeout time.Duration, onIdle func()) *IdleDetector {
+func NewIdleDetector(timeout time.Duration, onIdle func()) IdleTimer {
 	return &IdleDetector{
 		timeout: timeout,
 		onIdle:  onIdle,

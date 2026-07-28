@@ -16,13 +16,13 @@ const (
 
 // Gate tracks the enforcement state machine across compile/lint/test phases.
 type Gate struct {
-	output *OutputBuffer
+	output OutputAnalyzer
 }
 
-// NewGate creates a Gate with a fresh output buffer.
-func NewGate() *Gate {
+// NewGate creates a Gate with the given output analyzer.
+func NewGate(analyzer OutputAnalyzer) *Gate {
 	return &Gate{
-		output: NewOutputBuffer(),
+		output: analyzer,
 	}
 }
 
@@ -31,7 +31,7 @@ func NewGate() *Gate {
 // and sends type prompts to advance through compile → lint → test.
 func HandleLauncher(ctx context.Context, conn LauncherConn) {
 	defer conn.Close()
-	gate := NewGate()
+	gate := NewGate(NewOutputBuffer())
 
 	for {
 		select {

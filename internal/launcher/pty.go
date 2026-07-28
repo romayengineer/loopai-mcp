@@ -28,6 +28,17 @@ const (
 	ptyCloseTimeout = 5 * time.Second
 )
 
+// Process is the interface for a PTY-based child process. It decouples
+// consumers from the concrete PtyProcess, enabling alternative implementations
+// for testing.
+type Process interface {
+	io.ReadWriteCloser
+	Signal(os.Signal) error
+	Wait() <-chan struct{}
+	ExitCode() int
+	PID() int
+}
+
 // PtyProcess manages a child process running inside a pseudo-terminal.
 // It provides Read/Write access to the PTY, signal delivery, and exit
 // code tracking via atomic fields safe for concurrent access.
@@ -38,9 +49,9 @@ type PtyProcess struct {
 	exitCode atomic.Int64
 }
 
-// Spawn starts a client binary inside a PTY and returns a PtyProcess
+// Spawn starts a client binary inside a PTY and returns a Process
 // that can be used to interact with it.
-func Spawn(client string, args []string) (*PtyProcess, error) {
+func Spawn(client string, args []string) (Process, error) {
 	binary, err := exec.LookPath(client)
 	if err != nil {
 		return nil, fmt.Errorf("client %q not found on PATH: %w", client, err)
@@ -150,6 +161,14 @@ func (p *PtyProcess) Wait() <-chan struct{} {
 // ExitCode returns the process exit code, or -1 if not yet exited.
 func (p *PtyProcess) ExitCode() int {
 	return int(p.exitCode.Load())
+}
+
+// PID returns the process ID of the spawned child.
+func (p *PtyProcess) PID() int {
+	if p.Cmd != nil && p.Cmd.Process != nil {
+		return p.Cmd.Process.Pid
+	}
+	return -1
 }
 
 // Close closes the PTY file descriptor and kills the process if running.

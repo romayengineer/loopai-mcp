@@ -5,6 +5,15 @@ import (
 	"sync"
 )
 
+// OutputAnalyzer is the interface for analyzing terminal output and
+// determining the current phase and its result. Decouples the
+// enforcement state machine from the concrete buffer implementation.
+type OutputAnalyzer interface {
+	Write(data []byte)
+	Analyze() GateResult
+	Reset()
+}
+
 // OutputBuffer accumulates terminal output between idle events and
 // detects the current phase (compile/lint/test) from the content.
 type OutputBuffer struct {

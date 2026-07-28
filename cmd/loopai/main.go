@@ -44,7 +44,7 @@ func main() {
 	ctx := context.Background()
 
 	msg, err := proto.NewMessage(proto.MsgStarted, proto.StartedPayload{
-		Pid:    proc.Cmd.Process.Pid,
+		Pid:    proc.PID(),
 		Client: *client,
 	})
 	if err != nil {
