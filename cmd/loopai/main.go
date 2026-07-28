@@ -78,6 +78,16 @@ func main() {
 	<-errCh
 	idle.Stop()
 
+	// Tell PipeBackendToPTY to stop before sending the exit message,
+	// otherwise it may still be blocked on Receive, causing a data race.
+	shutdownMsg, sErr := proto.NewMessage(proto.MsgShutdown, proto.ShutdownPayload{})
+	if sErr != nil {
+		slog.Warn("marshal shutdown", "error", sErr)
+	} else if err := pc.Send(ctx, shutdownMsg); err != nil {
+		slog.Warn("send shutdown", "error", err)
+	}
+	<-errCh
+
 	<-proc.Wait()
 	exitCode := proc.ExitCode()
 

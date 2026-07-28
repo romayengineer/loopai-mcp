@@ -2,6 +2,7 @@ package backend
 
 import "regexp"
 
+// Phase identifies which enforcement gate the model is currently in.
 type Phase int
 
 const (
@@ -24,6 +25,7 @@ func (p Phase) String() string {
 	}
 }
 
+// PhaseResult indicates whether a given phase passed or failed.
 type PhaseResult int
 
 const (
@@ -43,6 +45,7 @@ func (r PhaseResult) String() string {
 	}
 }
 
+// GateResult pairs a detected phase with its success/failure result.
 type GateResult struct {
 	Phase  Phase
 	Result PhaseResult

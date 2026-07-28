@@ -12,12 +12,17 @@ import (
 )
 
 const (
-	SocketFileName                = "loopai.sock"
-	SocketDirMode     os.FileMode = 0700
+	// SocketFileName is the default Unix socket filename.
+	SocketFileName = "loopai.sock"
+	// SocketDirMode is the permission mode for the socket directory.
+	SocketDirMode os.FileMode = 0700
+	// SocketFileMode is the permission mode for the socket file.
 	SocketFileMode    os.FileMode = 0600
 	socketDialTimeout             = 5 * time.Second
 )
 
+// DefaultSocketPath returns the default Unix socket path, using
+// LOOPAI_SOCKET_DIR, ~/.config/loopai, or /tmp as the directory.
 func DefaultSocketPath() string {
 	dir := os.Getenv("LOOPAI_SOCKET_DIR")
 	if dir == "" {
@@ -34,6 +39,8 @@ func DefaultSocketPath() string {
 	return filepath.Join(dir, SocketFileName)
 }
 
+// Listen creates a Unix socket listener at the given path, removing
+// any stale socket file first.
 func Listen(socketPath string) (net.Listener, error) {
 	if err := os.Remove(socketPath); err != nil && !os.IsNotExist(err) {
 		return nil, fmt.Errorf("remove stale socket: %w", err)
@@ -48,13 +55,14 @@ func Listen(socketPath string) (net.Listener, error) {
 	}
 	if err := os.Chmod(socketPath, SocketFileMode); err != nil {
 		if closeErr := ln.Close(); closeErr != nil {
-			err = fmt.Errorf("chmod socket: %w (close: %v)", err, closeErr)
+			return nil, fmt.Errorf("chmod socket: %w (close: %v)", err, closeErr)
 		}
 		return nil, fmt.Errorf("chmod socket: %w", err)
 	}
 	return ln, nil
 }
 
+// Connect dials a Unix socket at the given path with a dial timeout.
 func Connect(socketPath string) (net.Conn, error) {
 	conn, err := net.DialTimeout("unix", socketPath, socketDialTimeout)
 	if err != nil {
@@ -63,12 +71,15 @@ func Connect(socketPath string) (net.Conn, error) {
 	return conn, nil
 }
 
+// Conn wraps a net.Conn with a JSON encoder/decoder for reading and
+// writing newline-delimited Message frames.
 type Conn struct {
 	conn   net.Conn
 	writer *json.Encoder
 	reader *bufio.Scanner
 }
 
+// NewConn creates a Conn wrapping the given network connection.
 func NewConn(conn net.Conn) *Conn {
 	return &Conn{
 		conn:   conn,
@@ -77,6 +88,8 @@ func NewConn(conn net.Conn) *Conn {
 	}
 }
 
+// Send encodes and writes a Message to the connection. If ctx carries
+// a deadline, the write deadline is set accordingly.
 func (c *Conn) Send(ctx context.Context, msg Message) error {
 	if deadline, ok := ctx.Deadline(); ok {
 		if err := c.conn.SetWriteDeadline(deadline); err != nil {
@@ -86,6 +99,8 @@ func (c *Conn) Send(ctx context.Context, msg Message) error {
 	return c.writer.Encode(msg)
 }
 
+// Receive reads a newline-delimited JSON Message from the connection.
+// If ctx carries a deadline, the read deadline is set accordingly.
 func (c *Conn) Receive(ctx context.Context) (Message, error) {
 	if deadline, ok := ctx.Deadline(); ok {
 		if err := c.conn.SetReadDeadline(deadline); err != nil {
@@ -105,6 +120,7 @@ func (c *Conn) Receive(ctx context.Context) (Message, error) {
 	return msg, nil
 }
 
+// Close closes the underlying network connection.
 func (c *Conn) Close() error {
 	return c.conn.Close()
 }

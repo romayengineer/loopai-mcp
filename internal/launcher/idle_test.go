@@ -1,6 +1,7 @@
 package launcher
 
 import (
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -72,4 +73,36 @@ func TestIdleDetectorDoubleStop(t *testing.T) {
 	detector.Start()
 	detector.Stop()
 	detector.Stop() // should not panic
+}
+
+func TestIdleDetectorConcurrentReset(t *testing.T) {
+	detector := NewIdleDetector(1*time.Second, func() {})
+	detector.Start()
+	defer detector.Stop()
+
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			detector.Reset()
+		}()
+	}
+	wg.Wait()
+	// Test passes if no panic from timer race
+}
+
+func TestIdleDetectorStartRace(t *testing.T) {
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			d := NewIdleDetector(1*time.Second, func() {})
+			d.Start()
+			d.Stop()
+		}()
+	}
+	wg.Wait()
+	// Test passes if no panic from concurrent Start/Stop races
 }

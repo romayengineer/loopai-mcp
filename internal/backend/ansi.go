@@ -2,6 +2,8 @@ package backend
 
 const esc = 0x1B
 
+// StripANSI removes ANSI escape sequences from data, returning a
+// clean copy suitable for pattern matching.
 func StripANSI(data []byte) []byte {
 	if len(data) == 0 {
 		return data

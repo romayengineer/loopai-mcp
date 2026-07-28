@@ -14,18 +14,23 @@ const (
 	promptTestFail    = "The last test run had failures. Fix them and re-run the tests."
 )
 
+// Gate tracks the enforcement state machine across compile/lint/test phases.
 type Gate struct {
 	output      *OutputBuffer
 	pendingLint bool
 	pendingTest bool
 }
 
+// NewGate creates a Gate with a fresh output buffer.
 func NewGate() *Gate {
 	return &Gate{
 		output: NewOutputBuffer(),
 	}
 }
 
+// HandleLauncher drives the enforcement loop for a single launcher
+// connection: reads output/idle/exited messages, runs phase detection,
+// and sends type prompts to advance through compile → lint → test.
 func HandleLauncher(ctx context.Context, pc *proto.Conn) {
 	defer pc.Close()
 	gate := NewGate()

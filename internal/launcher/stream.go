@@ -13,6 +13,8 @@ import (
 
 const readBufSize = 65536
 
+// PipePTYToBackend reads PTY output and forwards it to the backend
+// over the Unix socket. Idle is reset on each chunk of output.
 func PipePTYToBackend(ctx context.Context, pc *proto.Conn, proc *PtyProcess, idle *IdleDetector) error {
 	buf := make([]byte, readBufSize)
 	for {
@@ -44,6 +46,8 @@ func PipePTYToBackend(ctx context.Context, pc *proto.Conn, proc *PtyProcess, idl
 	}
 }
 
+// PipeBackendToPTY receives messages from the backend and writes them
+// into the PTY (type prompts, Ctrl+C, shutdown).
 func PipeBackendToPTY(ctx context.Context, pc *proto.Conn, proc *PtyProcess) error {
 	for {
 		select {
