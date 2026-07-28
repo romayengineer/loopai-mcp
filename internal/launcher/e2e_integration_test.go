@@ -3,6 +3,7 @@
 package launcher
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"sync"
@@ -26,15 +27,16 @@ func e2eSocketPath(t *testing.T, name string) string {
 	return path
 }
 
-func startE2EBackend(t *testing.T, socketPath string, handler func(*proto.Conn)) *backend.Backend {
+func startE2EBackend(t *testing.T, socketPath string, handler func(context.Context, *proto.Conn)) *backend.Backend {
 	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
 	b := backend.New(socketPath, handler)
 	go func() {
-		if err := b.Run(); err != nil {
+		if err := b.Run(ctx); err != nil {
 			t.Logf("backend exited: %v", err)
 		}
 	}()
-	t.Cleanup(func() { b.Stop() })
+	t.Cleanup(func() { cancel(); b.Stop() })
 	time.Sleep(startupTimeout)
 	return b
 }
@@ -50,7 +52,7 @@ func TestEndToEndEcho(t *testing.T) {
 		outputData string
 	)
 
-	handler := func(pc *proto.Conn) {
+	handler := func(_ context.Context, pc *proto.Conn) {
 		defer pc.Close()
 		for {
 			msg, err := pc.Receive()
@@ -159,7 +161,7 @@ func TestEndToEndExitCode(t *testing.T) {
 		mu       sync.Mutex
 	)
 
-	handler := func(pc *proto.Conn) {
+	handler := func(_ context.Context, pc *proto.Conn) {
 		defer pc.Close()
 		for {
 			msg, err := pc.Receive()
@@ -234,7 +236,7 @@ func TestEndToEndOutputStreaming(t *testing.T) {
 	var outputChunks []string
 	var mu sync.Mutex
 
-	handler := func(pc *proto.Conn) {
+	handler := func(_ context.Context, pc *proto.Conn) {
 		defer pc.Close()
 		for {
 			msg, err := pc.Receive()

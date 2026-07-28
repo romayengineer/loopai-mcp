@@ -18,8 +18,8 @@ const (
 )
 
 type Message struct {
-	Type    MessageType      `json:"type"`
-	Payload json.RawMessage  `json:"payload,omitempty"`
+	Type    MessageType     `json:"type"`
+	Payload json.RawMessage `json:"payload,omitempty"`
 }
 
 func NewMessage(typ MessageType, v interface{}) Message {

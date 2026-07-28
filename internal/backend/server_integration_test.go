@@ -3,6 +3,7 @@
 package backend
 
 import (
+	"context"
 	"os"
 	"sync/atomic"
 	"testing"
@@ -21,15 +22,16 @@ func socketPath(t *testing.T, name string) string {
 	return path
 }
 
-func startTestBackend(t *testing.T, sp string, handler func(*proto.Conn)) *Backend {
+func startTestBackend(t *testing.T, sp string, handler func(context.Context, *proto.Conn)) *Backend {
 	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
 	b := New(sp, handler)
 	go func() {
-		if err := b.Run(); err != nil {
+		if err := b.Run(ctx); err != nil {
 			t.Logf("backend exited: %v", err)
 		}
 	}()
-	t.Cleanup(func() { b.Stop() })
+	t.Cleanup(func() { cancel(); b.Stop() })
 	time.Sleep(testStartupTimeout)
 	return b
 }
@@ -38,7 +40,7 @@ func TestBackendAcceptsLauncher(t *testing.T) {
 	sp := socketPath(t, "accept.sock")
 
 	var started atomic.Bool
-	handler := func(pc *proto.Conn) {
+	handler := func(_ context.Context, pc *proto.Conn) {
 		defer pc.Close()
 		msg, err := pc.Receive()
 		if err != nil {
@@ -84,7 +86,7 @@ func TestBackendAcceptsLauncher(t *testing.T) {
 func TestBackendFullExchange(t *testing.T) {
 	sp := socketPath(t, "full.sock")
 
-	handler := func(pc *proto.Conn) {
+	handler := func(_ context.Context, pc *proto.Conn) {
 		defer pc.Close()
 		for i := 0; i < 3; i++ {
 			msg, err := pc.Receive()

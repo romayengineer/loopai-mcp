@@ -1,0 +1,30 @@
+version: "2"
+linters:
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gofmt
+    - gci
+    - misspell
+  exclusions:
+    generate:
+      rules:
+        - (?i)\.pb\.go
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    paths:
+      - _test\.go$
+formatters:
+  enable:
+    - gofmt
+    - gci
+  exclusions:
+    paths:
+      - _test\.go$

@@ -1,2 +1,5 @@
 loopai
 loopai-backend
+*.exe
+dist/
+/tmp/

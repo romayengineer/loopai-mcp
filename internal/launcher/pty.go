@@ -16,10 +16,10 @@ import (
 )
 
 const (
-	DefaultRows  uint16 = 40
-	DefaultCols  uint16 = 120
-	TermEnv             = "TERM=xterm-256color"
-	ptyCloseTimeout      = 5 * time.Second
+	DefaultRows     uint16 = 40
+	DefaultCols     uint16 = 120
+	TermEnv                = "TERM=xterm-256color"
+	ptyCloseTimeout        = 5 * time.Second
 )
 
 type PtyProcess struct {

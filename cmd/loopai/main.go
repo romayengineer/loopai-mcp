@@ -3,7 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"time"
 
@@ -17,9 +17,12 @@ func main() {
 	idleTimeout := flag.Duration("idle", 5*time.Second, "idle timeout before signaling backend")
 	flag.Parse()
 
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
+
 	conn, err := proto.Connect(*socketPath)
 	if err != nil {
-		log.Fatalf("connect to backend: %v\n  (is loopai-backend running?)", err)
+		slog.Error("connect to backend", "error", err)
+		os.Exit(1)
 	}
 	pc := proto.NewConn(conn)
 	defer pc.Close()
@@ -31,7 +34,8 @@ func main() {
 
 	proc, err := launcher.Spawn(*client, args)
 	if err != nil {
-		log.Fatal(err)
+		slog.Error("spawn client", "client", *client, "error", err)
+		os.Exit(1)
 	}
 	defer proc.Close()
 
@@ -39,12 +43,12 @@ func main() {
 		Pid:    proc.Cmd.Process.Pid,
 		Client: *client,
 	})); err != nil {
-		log.Printf("send started: %v", err)
+		slog.Warn("send started", "error", err)
 	}
 
 	idle := launcher.NewIdleDetector(*idleTimeout, func() {
 		if err := pc.Send(proto.NewMessage(proto.MsgIdle, proto.IdlePayload{})); err != nil {
-			log.Printf("send idle: %v", err)
+			slog.Warn("send idle", "error", err)
 		}
 	})
 	idle.Start()
@@ -68,7 +72,7 @@ func main() {
 	if err := pc.Send(proto.NewMessage(proto.MsgExited, proto.ExitedPayload{
 		Code: exitCode,
 	})); err != nil {
-		log.Printf("send exited: %v", err)
+		slog.Warn("send exited", "error", err)
 	}
 
 	if exitCode != 0 {

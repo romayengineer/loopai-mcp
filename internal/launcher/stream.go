@@ -3,7 +3,7 @@ package launcher
 import (
 	"encoding/json"
 	"io"
-	"log"
+	"log/slog"
 	"os"
 
 	"github.com/romayengineer/loopai-mcp/internal/proto"
@@ -44,7 +44,7 @@ func PipeBackendToPTY(pc *proto.Conn, proc *PtyProcess) error {
 		case proto.MsgType:
 			var p proto.TypePayload
 			if err := json.Unmarshal(msg.Payload, &p); err != nil {
-				log.Printf("bad type payload: %v", err)
+				slog.Warn("bad type payload", "error", err)
 				continue
 			}
 			input := []byte(p.Text + "\n")
@@ -54,14 +54,14 @@ func PipeBackendToPTY(pc *proto.Conn, proc *PtyProcess) error {
 
 		case proto.MsgCtrlC:
 			if err := proc.Signal(os.Interrupt); err != nil {
-				log.Printf("ctrl+c error: %v", err)
+				slog.Warn("ctrl+c error", "error", err)
 			}
 
 		case proto.MsgShutdown:
 			return nil
 
 		default:
-			log.Printf("unknown message from backend: %s", msg.Type)
+			slog.Warn("unknown message from backend", "type", msg.Type)
 		}
 	}
 }

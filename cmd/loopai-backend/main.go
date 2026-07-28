@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"flag"
-	"log"
+	"log/slog"
+	"os"
 
 	"github.com/romayengineer/loopai-mcp/internal/backend"
 	"github.com/romayengineer/loopai-mcp/internal/proto"
@@ -12,9 +14,11 @@ func main() {
 	socketPath := flag.String("socket", proto.DefaultSocketPath(), "unix socket path")
 	flag.Parse()
 
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
+
 	b := backend.New(*socketPath, backend.HandleLauncher)
-	log.Printf("loopai-backend starting on %s", *socketPath)
-	if err := b.Run(); err != nil {
-		log.Fatal(err)
+	if err := b.Run(context.Background()); err != nil {
+		slog.Error("backend", "error", err)
+		os.Exit(1)
 	}
 }

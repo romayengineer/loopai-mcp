@@ -1,7 +1,7 @@
 package launcher
 
 import (
-	"log"
+	"log/slog"
 	"sync/atomic"
 	"time"
 )
@@ -45,6 +45,6 @@ func (d *IdleDetector) fire() {
 	if !d.running.Load() {
 		return
 	}
-	log.Printf("[idle] no output for %v", d.timeout)
+	slog.Debug("idle detector fired", "timeout", d.timeout)
 	d.onIdle()
 }

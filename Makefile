@@ -1,9 +1,16 @@
-.PHONY: all build test test-unit test-integration test-all clean
+.PHONY: all build test-unit test-integration test-all test fmt vet install-hooks clean
 
 all: build test-all
 
 build:
 	go build ./cmd/...
+
+fmt:
+	gofmt -s -l .
+	@echo "OK"
+
+vet:
+	go vet ./internal/... ./cmd/...
 
 test-unit:
 	go test ./internal/... -count=1 -timeout 30s
@@ -16,6 +23,9 @@ test-all: test-unit test-integration
 
 test:
 	go test -tags=integration ./internal/... -count=1 -timeout 30s
+
+install-hooks:
+	git config core.hooksPath .githooks
 
 clean:
 	rm -f loopai loopai-backend

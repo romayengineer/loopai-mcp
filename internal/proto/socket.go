@@ -11,10 +11,10 @@ import (
 )
 
 const (
-	SocketFileName  = "loopai.sock"
-	SocketDirMode   os.FileMode = 0700
-	SocketFileMode  os.FileMode = 0600
-	socketDialTimeout           = 5 * time.Second
+	SocketFileName                = "loopai.sock"
+	SocketDirMode     os.FileMode = 0700
+	SocketFileMode    os.FileMode = 0600
+	socketDialTimeout             = 5 * time.Second
 )
 
 func DefaultSocketPath() string {

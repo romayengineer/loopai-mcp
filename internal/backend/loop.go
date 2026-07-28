@@ -1,8 +1,9 @@
 package backend
 
 import (
+	"context"
 	"encoding/json"
-	"log"
+	"log/slog"
 	"os"
 
 	"github.com/romayengineer/loopai-mcp/internal/proto"
@@ -10,13 +11,19 @@ import (
 
 const defaultIdlePrompt = "list the directory contents"
 
-func HandleLauncher(pc *proto.Conn) {
+func HandleLauncher(ctx context.Context, pc *proto.Conn) {
 	defer pc.Close()
 
 	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
 		msg, err := pc.Receive()
 		if err != nil {
-			log.Printf("connection error: %v", err)
+			slog.Debug("launcher disconnected", "error", err)
 			return
 		}
 
@@ -24,41 +31,41 @@ func HandleLauncher(pc *proto.Conn) {
 		case proto.MsgOutput:
 			var p proto.OutputPayload
 			if err := json.Unmarshal(msg.Payload, &p); err != nil {
-				log.Printf("bad output payload: %v", err)
+				slog.Warn("bad output payload", "error", err)
 				continue
 			}
 			if _, err := os.Stdout.Write(p.Data); err != nil {
-				log.Printf("write output: %v", err)
+				slog.Error("write output", "error", err)
 			}
 
 		case proto.MsgIdle:
-			log.Printf("[idle] client waiting for input")
+			slog.Info("client idle, sending prompt")
 			if err := pc.Send(proto.NewMessage(proto.MsgType, proto.TypePayload{
 				Text: defaultIdlePrompt,
 			})); err != nil {
-				log.Printf("send idle prompt: %v", err)
+				slog.Warn("send idle prompt failed", "error", err)
 				return
 			}
 
 		case proto.MsgExited:
 			var p proto.ExitedPayload
 			if err := json.Unmarshal(msg.Payload, &p); err != nil {
-				log.Printf("bad exited payload: %v", err)
+				slog.Warn("bad exited payload", "error", err)
 				return
 			}
-			log.Printf("client exited with code %d signal %s", p.Code, p.Signal)
+			slog.Info("client exited", "code", p.Code, "signal", p.Signal)
 			return
 
 		case proto.MsgStarted:
 			var p proto.StartedPayload
 			if err := json.Unmarshal(msg.Payload, &p); err != nil {
-				log.Printf("bad started payload: %v", err)
+				slog.Warn("bad started payload", "error", err)
 				continue
 			}
-			log.Printf("client started: %s (pid %d)", p.Client, p.Pid)
+			slog.Info("client started", "client", p.Client, "pid", p.Pid)
 
 		default:
-			log.Printf("unknown message type: %s", msg.Type)
+			slog.Warn("unknown message", "type", msg.Type)
 		}
 	}
 }
