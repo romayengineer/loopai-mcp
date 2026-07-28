@@ -5,8 +5,6 @@ import (
 	"strings"
 )
 
-const defaultMaxErrorBytes = 100 * 1024
-
 // Phase identifies which enforcement gate the model is currently in.
 type Phase int
 

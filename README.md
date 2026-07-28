@@ -35,13 +35,13 @@ make build           # builds all binaries
 
 ```
 loopai (launcher)                    loopai-backend
-  allocates PTY                        reads terminal output
-  spawns claude/opencode inside        detects compile/lint/test phases
-  streams I/O to backend ◄──socket──►  types prompts, sends Ctrl+C
-  detects idle timeout                 enforces: compile → lint → test
+  allocates PTY                        runs go build → golangci-lint → go test
+  spawns claude/opencode inside        on idle, runs enforcement tools
+  streams I/O to backend ◄──socket──►  types prompts with results
+  detects idle timeout                 fail-fast: stops at first failure
 ```
 
-The launcher replaces your normal CLI — run `loopai` instead of `claude`. The backend is the brain that enforces the hard rule loop.
+The launcher replaces your normal CLI — run `loopai` instead of `claude`. The backend is the brain that proactively enforces the hard rule loop by running tools directly.
 
 ## Quickstart
 
@@ -56,7 +56,7 @@ loopai-backend
 loopai -client claude "fix the failing tests"
 ```
 
-The backend watches terminal output. When it detects `go build`/`go test`/`golangci-lint` commands, it analyzes the output. If a step fails, it prompts the model to fix it before proceeding to the next gate.
+The backend runs `go build ./...`, `golangci-lint run ./...`, and `go test ./...` directly on the host in the directory where `loopai-backend` was started. Tools execute on idle events (default: 5s of no client output). If any tool fails, a single failure prompt is sent. If all pass, a best-practices prompt is sent.
 
 ## Commands
 
@@ -77,20 +77,31 @@ The backend watches terminal output. When it detects `go build`/`go test`/`golan
 | `-idle` | `5s` | Idle timeout before signaling backend |
 | `-passthrough` | `false` | Show PTY output on terminal alongside backend enforcement |
 | `-interactive` | `false` | Interactive mode: stdin → PTY, PTY → terminal (implies `-passthrough`). Strips CSI u escape sequences (arrows, function keys) from stdin before forwarding to PTY, so raw terminal artifacts like `^[[<35;5u` don't appear on the client. Disables PTY ECHO to prevent double-echo. |
-| `-prompts-dir` | `./prompts` | Directory for prompt template files. Supports `text/template` syntax with `{{.Errors}}`, `{{.Phase}}`, `{{.Result}}`, `{{.BufSize}}`, `{{.Output}}` variables. |
+| `-prompts-dir` | `./prompts` | Directory for prompt template files. Supports Go `text/template` with `{{.FailedTool}}` and `{{.Output}}` variables. |
+| `-tool-output-max` | `4096` | Max bytes of tool output to include in failure prompts |
+| `-log-level` | `info` | Log level: `debug`, `info`, `warn`, `error` |
 
-## Enforcement gates
+## Enforcement
 
-The backend enforces: **compile → lint → test**
+The backend runs enforcement tools **proactively** on each idle event (default 30s cooldown between runs):
 
-On each idle event, buffered output is analyzed:
-- **compile**: detects `go build`/`go vet` errors (`.go:line:col:` patterns) — empty output = success
-- **lint**: detects `golangci-lint` issues (same file:line:col format) — empty output = success
-- **test**: detects `ok` (pass) vs `--- FAIL:` (failure) patterns
+```
+go build ./...          → if fails → send "failure" prompt with error output
+golangci-lint run ./... → if fails → send "failure" prompt (fail-fast)
+go test ./...           → if fails → send "failure" prompt (fail-fast)
+all pass                → send "idle" prompt (best-practices)
+```
 
-If a step fails, the backend types a fix prompt into the terminal. The model fixes the code, re-runs the tool, and the loop continues until all gates pass.
+Only **one prompt** is sent per idle event. On failure, the client fixes the issue and the next idle triggers a fresh enforcement run.
 
-Phase detection is language-specific. Currently supports Go tools only. Extensible via configuration.
+### Prompt templates
+
+Prompts are stored as `.md` files in the `prompts/` directory (configurable via `-prompts-dir`). They use Go `text/template` syntax and are read from disk on every send — edit them without restarting.
+
+| File | When sent | Variables |
+|---|---|---|
+| `failure.md` | Any enforcement tool fails | `{{.FailedTool}}`, `{{.Output}}` |
+| `idle.md` | All tools pass | _(none)_ |
 
 ## Architecture
 

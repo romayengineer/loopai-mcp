@@ -8,39 +8,16 @@ import (
 	"github.com/romayengineer/loopai-mcp/internal/proto"
 )
 
-// GateFactory is a function that creates a Gate for a launcher connection.
-// Enables dependency injection for testing without modifying global state.
-type GateFactory func() *Gate
-
-// DefaultPromptsDir is the directory containing prompt template files.
-// Set before starting the backend to use a custom location.
-var DefaultPromptsDir = "prompts"
-
-// defaultGateFactory creates a Gate with the default output buffer and
-// prompt loader using DefaultPromptsDir.
-func defaultGateFactory() *Gate {
-	return NewGate(NewOutputBuffer(), NewPromptLoader(DefaultPromptsDir))
-}
-
-// HandleLauncher drives the enforcement loop for a single launcher connection.
-// It reads output/idle/exited messages, runs phase detection, and sends fix
-// prompts to advance through the compile → lint → test enforcement gates.
-//
-// The handler exits when the client exits (MsgExited) or disconnects,
-// ensuring proper cleanup via defer conn.Close().
-//
-// Gate creation can be customized by setting NewGateFunc before starting
-// the backend. The default uses NewOutputBuffer and NewPromptLoader.
-var NewGateFunc GateFactory = defaultGateFactory
-
+// HandleLauncher drives the enforcement loop for a single launcher
+// connection: reads idle messages, runs enforcement tools, and sends
+// prompts with the result back to the PTY.
 func HandleLauncher(ctx context.Context, conn LauncherConn) {
 	defer conn.Close()
-	gate := NewGateFunc()
+	gate := NewGate(NewPromptLoader(DefaultPromptsDir))
 
 	for {
 		select {
 		case <-ctx.Done():
-			slog.Debug("handler context cancelled")
 			return
 		default:
 		}
@@ -53,40 +30,31 @@ func HandleLauncher(ctx context.Context, conn LauncherConn) {
 
 		switch msg.Type {
 		case proto.MsgOutput:
-			var p proto.OutputPayload
-			if err := json.Unmarshal(msg.Payload, &p); err != nil {
-				// Log and continue for malformed output; don't break the loop.
-				// Output is informational and a parse error shouldn't stop enforcement.
-				slog.Warn("malformed output payload, skipping", "error", err)
-				continue
-			}
-			gate.handleOutput(p.Data)
+			// Discard client output — enforcement runs independently.
+			slog.Debug("received output (discarded)", "payload", string(msg.Payload))
 
 		case proto.MsgIdle:
-			gate.handleIdle(ctx, conn)
-
-		case proto.MsgStarted:
-			var p proto.StartedPayload
-			if err := json.Unmarshal(msg.Payload, &p); err != nil {
-				// Log and continue for malformed startup message.
-				slog.Warn("malformed started payload, skipping", "error", err)
-				continue
-			}
-			slog.Info("client started", "client", p.Client, "pid", p.Pid)
+			gate.HandleEnforcement(ctx, conn)
 
 		case proto.MsgExited:
 			var p proto.ExitedPayload
 			if err := json.Unmarshal(msg.Payload, &p); err != nil {
-				// Exit immediately on malformed exit message to prevent indefinite wait.
-				// The exit signal is critical and should not be skipped.
-				slog.Warn("malformed exited payload, exiting handler", "error", err)
+				slog.Warn("bad exited payload", "error", err)
 				return
 			}
 			slog.Info("client exited", "code", p.Code, "signal", p.Signal)
 			return
 
+		case proto.MsgStarted:
+			var p proto.StartedPayload
+			if err := json.Unmarshal(msg.Payload, &p); err != nil {
+				slog.Warn("bad started payload", "error", err)
+				continue
+			}
+			slog.Info("client started", "client", p.Client, "pid", p.Pid)
+
 		default:
-			slog.Warn("unknown message type", "type", msg.Type)
+			slog.Warn("unknown message", "type", msg.Type)
 		}
 	}
 }

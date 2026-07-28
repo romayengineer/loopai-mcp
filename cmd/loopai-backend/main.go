@@ -19,9 +19,12 @@ func main() {
 	socketPath := flag.String("socket", proto.DefaultSocketPath(), "unix socket path")
 	promptsDir := flag.String("prompts-dir", "prompts", "prompt template directory")
 	logLevel := flag.String("log-level", "info", "log level (debug, info, warn, error)")
+	toolOutputMax := flag.Int("tool-output-max", 4096, "max bytes of tool output to include in prompts")
 	flag.Parse()
 
 	proto.SetLogDefault(proto.ParseLogLevel(*logLevel))
+
+	backend.MaxToolOutput = *toolOutputMax
 
 	if flag.NArg() > 0 && flag.Arg(0) == "stop" {
 		if err := stopBackend(*socketPath); err != nil {
@@ -67,9 +70,7 @@ func main() {
 // expectedTemplates lists the prompt template files required for operation.
 // Each is validated at startup to catch template syntax errors early.
 var expectedTemplates = []string{
-	"compile-fail.md", "compile-pass.md",
-	"lint-fail.md", "lint-pass.md",
-	"test-fail.md", "test-pass.md",
+	"failure.md",
 	"idle.md",
 }
 

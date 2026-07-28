@@ -62,7 +62,7 @@ func startLoopHarness(t *testing.T, ctx context.Context, socketPath string, hand
 	go func() {
 		defer close(h.done)
 		for {
-			msg, err := pc.Receive(ctx)
+			msg, err := pc.Receive(context.Background())
 			if err != nil {
 				return
 			}
@@ -136,214 +136,57 @@ func (h *loopHarness) readMsgType(d time.Duration) string {
 	return p.Text
 }
 
-func TestLoopCompileFailureThenSuccess(t *testing.T) {
-	sp := loopSocketPath(t, "compile.sock")
+// TestLoopIdleTriggersEnforcement verifies that sending an idle message
+// triggers the enforcement loop and produces a prompt.
+func TestLoopIdleTriggersEnforcement(t *testing.T) {
+	sp := loopSocketPath(t, "idle.sock")
 	h := startLoopHarness(t, context.Background(), sp, HandleLauncher)
 
-	h.sendOutput("> go build ./...\n")
-	h.sendOutput("./main.go:23:2: undefined: Foo\n")
 	h.sendIdle()
 
-	text := h.readMsgType(2 * time.Second)
+	text := h.readMsgType(5 * time.Second)
 	if len(text) == 0 {
-		t.Fatal("expected non-empty prompt after compile failure")
-	}
-
-	h.sendOutput("> go build ./...\n")
-	h.sendIdle()
-
-	text2 := h.readMsgType(2 * time.Second)
-	if len(text2) == 0 {
-		t.Fatal("expected non-empty prompt after compile success")
+		t.Fatal("expected prompt after idle, got empty")
 	}
 }
 
-func TestLoopTestFailureThenSuccess(t *testing.T) {
-	sp := loopSocketPath(t, "testfail.sock")
+// TestLoopOutputThenIdle verifies that output followed by idle still triggers
+// enforcement (output is discarded, enforcement runs independently).
+func TestLoopOutputThenIdle(t *testing.T) {
+	sp := loopSocketPath(t, "outidle.sock")
 	h := startLoopHarness(t, context.Background(), sp, HandleLauncher)
 
-	h.sendOutput("> go test ./...\n")
-	h.sendOutput("--- FAIL: TestAdd\n    add_test.go:10: expected 5, got 4\nFAIL\n")
+	h.sendOutput("some output from client\n")
 	h.sendIdle()
 
-	text := h.readMsgType(2 * time.Second)
+	text := h.readMsgType(5 * time.Second)
 	if len(text) == 0 {
-		t.Fatal("expected non-empty prompt after test failure")
+		t.Fatal("expected prompt after output+idle, got empty")
 	}
 }
 
-func TestLoopProactivePromptOnIdleOutput(t *testing.T) {
-	sp := loopSocketPath(t, "proactive.sock")
+// TestLoopExitAfterIdle verifies that the handler processes exit correctly
+// after an idle event has triggered enforcement.
+func TestLoopExitAfterIdle(t *testing.T) {
+	sp := loopSocketPath(t, "exitidle.sock")
 	h := startLoopHarness(t, context.Background(), sp, HandleLauncher)
 
-	h.sendOutput("I'm thinking about the architecture\n")
 	h.sendIdle()
+	h.readMsgType(5 * time.Second)
 
-	text := h.readMsgType(2 * time.Second)
-	if len(text) == 0 {
-		t.Fatal("expected proactive prompt on idle output, got nothing")
+	// Send exit and verify handler terminates
+	exitMsg, err := proto.NewMessage(proto.MsgExited, proto.ExitedPayload{Code: 0})
+	if err != nil {
+		t.Fatalf("new message: %v", err)
 	}
-	if len(text) < 10 {
-		t.Fatalf("expected substantial prompt text, got: %q", text)
-	}
-}
+	h.pc.Send(context.Background(), exitMsg)
 
-func TestLoopCompileErrorPattern(t *testing.T) {
-	sp := loopSocketPath(t, "compileerr.sock")
-	h := startLoopHarness(t, context.Background(), sp, HandleLauncher)
+	time.Sleep(100 * time.Millisecond)
 
-	h.sendOutput("> go build ./...\n")
-	h.sendOutput("# github.com/user/repo\n./handler.go:42:2: unreachable code\n")
-	h.sendIdle()
-
-	text := h.readMsgType(2 * time.Second)
-	if len(text) == 0 {
-		t.Fatal("expected prompt after compile error")
-	}
-}
-
-func TestLoopLintFailure(t *testing.T) {
-	sp := loopSocketPath(t, "lintfail.sock")
-	h := startLoopHarness(t, context.Background(), sp, HandleLauncher)
-
-	h.sendOutput("> golangci-lint run ./...\n")
-	h.sendOutput("main.go:23:2: unused: variable x is unused\n")
-	h.sendIdle()
-
-	text := h.readMsgType(2 * time.Second)
-	if len(text) == 0 {
-		t.Fatal("expected prompt after lint failure")
-	}
-}
-
-func TestLoopFullSuccessSequence(t *testing.T) {
-	sp := loopSocketPath(t, "fullpass.sock")
-	h := startLoopHarness(t, context.Background(), sp, HandleLauncher)
-
-	// Phase 1: compile passes
-	h.sendOutput("> go build ./...\n")
-	h.sendIdle()
-	text := h.readMsgType(2 * time.Second)
-	if len(text) == 0 {
-		t.Fatal("expected prompt after compile success")
-	}
-
-	// Phase 2: lint passes
-	h.sendOutput("> golangci-lint run ./...\n")
-	h.sendIdle()
-	text2 := h.readMsgType(2 * time.Second)
-	if len(text2) == 0 {
-		t.Fatal("expected prompt after lint success")
-	}
-
-	// Phase 3: test passes
-	h.sendOutput("> go test ./...\n")
-	h.sendOutput("ok  github.com/user/repo\t0.234s\n")
-	h.sendIdle()
-	text3 := h.readMsgType(2 * time.Second)
-	if len(text3) == 0 {
-		t.Fatal("expected prompt after test success")
-	}
-}
-
-func TestLoopBadOutputPayload(t *testing.T) {
-	sp := loopSocketPath(t, "badpayload.sock")
-	h := startLoopHarness(t, context.Background(), sp, HandleLauncher)
-
-	// Send output with invalid JSON payload
-	badMsg := proto.Message{Type: proto.MsgOutput, Payload: []byte(`{invalid}`)}
-	h.pc.Send(context.Background(), badMsg)
-
-	// The loop should continue (not crash). Verify by sending a valid message.
-	h.sendOutput("> go build ./...\n")
-	h.sendOutput("./main.go:5:2: undefined: Foo\n")
-	h.sendIdle()
-
-	text := h.readMsgType(2 * time.Second)
-	if len(text) == 0 {
-		t.Fatal("expected prompt after compile failure, loop may have crashed on bad payload")
-	}
-}
-
-func TestLoopUnknownMessageType(t *testing.T) {
-	sp := loopSocketPath(t, "unknownmsg.sock")
-	h := startLoopHarness(t, context.Background(), sp, HandleLauncher)
-
-	// Send an unknown message type - loop should log and continue
-	unknownMsg := proto.Message{Type: "unknown_type"}
-	h.pc.Send(context.Background(), unknownMsg)
-
-	// Verify loop still works
-	h.sendOutput("> go build ./...\n")
-	h.sendOutput("./main.go:5:2: undefined: Foo\n")
-	h.sendIdle()
-
-	text := h.readMsgType(2 * time.Second)
-	if len(text) == 0 {
-		t.Fatal("expected prompt after unknown message, loop may have crashed")
-	}
-}
-
-func TestLoopBadStartedPayload(t *testing.T) {
-	sp := loopSocketPath(t, "badstarted.sock")
-	h := startLoopHarness(t, context.Background(), sp, HandleLauncher)
-
-	// Send MsgStarted with invalid JSON payload
-	badMsg := proto.Message{Type: proto.MsgStarted, Payload: []byte(`{invalid}`)}
-	h.pc.Send(context.Background(), badMsg)
-
-	// The loop should continue (not crash). Verify by sending a valid message.
-	h.sendOutput("> go build ./...\n")
-	h.sendOutput("./main.go:5:2: undefined: Foo\n")
-	h.sendIdle()
-
-	text := h.readMsgType(2 * time.Second)
-	if len(text) == 0 {
-		t.Fatal("expected prompt after bad started payload, loop may have crashed")
-	}
-}
-
-func TestLoopBadExitedPayload(t *testing.T) {
-	sp := loopSocketPath(t, "badexited.sock")
-	h := startLoopHarness(t, context.Background(), sp, HandleLauncher)
-
-	// Send MsgExited with invalid JSON payload - handler should return
-	// (not crash). We detect exit by checking that recvCh closes.
-	badMsg := proto.Message{Type: proto.MsgExited, Payload: []byte(`{invalid}`)}
-	h.pc.Send(context.Background(), badMsg)
-
-	time.Sleep(200 * time.Millisecond)
-
-	// The handler should have exited, closing the connection.
-	// Our recv goroutine should detect this and close recvCh.
 	select {
 	case _, ok := <-h.recvCh:
 		if !ok {
-			// recvCh closed - handler exited as expected
-		}
-	default:
-	}
-}
-
-func TestLoopContextCancel(t *testing.T) {
-	sp := loopSocketPath(t, "ctxcancel.sock")
-	ctx, cancel := context.WithCancel(context.Background())
-
-	h := startLoopHarness(t, ctx, sp, HandleLauncher)
-
-	// Cancel the context - the handler should exit
-	cancel()
-
-	// Wait for the handler to exit by sending a message and checking
-	// that the recv goroutine detects the connection close.
-	time.Sleep(200 * time.Millisecond)
-	// After context cancel, the next Receive should return ctx.Err()
-	// which causes HandleLauncher to return and close the connection.
-	// We detect this by checking that our recvCh stops getting messages.
-	select {
-	case _, ok := <-h.recvCh:
-		if ok {
-			// We still got a message - but that's ok if it was sent before cancel
+			// recvCh closed — handler exited
 		}
 	default:
 	}

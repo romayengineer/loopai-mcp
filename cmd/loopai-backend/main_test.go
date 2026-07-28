@@ -55,8 +55,7 @@ func TestValidatePromptsDirEmpty(t *testing.T) {
 func TestValidatePromptsDirWithFiles(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Create some mock prompt files
-	files := []string{"compile-fail.md", "compile-pass.md", "test-fail.md"}
+	files := []string{"failure.md", "idle.md"}
 	for _, f := range files {
 		path := filepath.Join(tmpDir, f)
 		if err := os.WriteFile(path, []byte("prompt content"), 0644); err != nil {
@@ -73,9 +72,8 @@ func TestValidatePromptsDirWithFiles(t *testing.T) {
 func TestValidatePromptsDirInvalidTemplate(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Create a template with invalid Go template syntax (unclosed action)
-	path := filepath.Join(tmpDir, "compile-fail.md")
-	if err := os.WriteFile(path, []byte("{{.Phase}"), 0644); err != nil {
+	path := filepath.Join(tmpDir, "failure.md")
+	if err := os.WriteFile(path, []byte("{{.BadSyntax"), 0644); err != nil {
 		t.Fatalf("setup failed: %v", err)
 	}
 
@@ -88,9 +86,8 @@ func TestValidatePromptsDirInvalidTemplate(t *testing.T) {
 func TestValidatePromptsDirValidTemplate(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Template with valid Go template syntax using documented variables
-	path := filepath.Join(tmpDir, "compile-fail.md")
-	content := `Fix the error: {{.Errors}}`
+	path := filepath.Join(tmpDir, "failure.md")
+	content := `Fix: {{.FailedTool}}: {{.Output}}`
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		t.Fatalf("setup failed: %v", err)
 	}
