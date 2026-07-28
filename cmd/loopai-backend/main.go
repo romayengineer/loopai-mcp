@@ -15,6 +15,7 @@ import (
 
 func main() {
 	socketPath := flag.String("socket", proto.DefaultSocketPath(), "unix socket path")
+	promptsDir := flag.String("prompts-dir", "prompts", "prompt template directory")
 	logLevel := flag.String("log-level", "info", "log level (debug, info, warn, error)")
 	flag.Parse()
 
@@ -50,6 +51,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	backend.DefaultPromptsDir = *promptsDir
 	b := backend.New(*socketPath, backend.HandleLauncher)
 
 	sigCh := make(chan os.Signal, 1)

@@ -50,7 +50,7 @@ func TestGateHandleIdleSendError(t *testing.T) {
 	// handleIdle's send() closure should log and continue on Send error.
 	gate := NewGate(&mockAnalyzer{
 		result: GateResult{Phase: PhaseCompile, Result: ResultSuccess},
-	})
+	}, NewPromptLoader("."))
 	var conn mockLauncherConnSendError
 
 	gate.handleIdle(context.Background(), &conn)
@@ -76,7 +76,7 @@ func TestGateHandleIdle(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			gate := NewGate(&mockAnalyzer{
 				result: GateResult{Phase: tt.phase, Result: tt.result},
-			})
+			}, NewPromptLoader("."))
 			var conn mockLauncherConn
 
 			gate.handleIdle(context.Background(), &conn)

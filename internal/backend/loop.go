@@ -8,12 +8,16 @@ import (
 	"github.com/romayengineer/loopai-mcp/internal/proto"
 )
 
+// DefaultPromptsDir is the directory containing prompt template files.
+// Set before starting the backend to use a custom location.
+var DefaultPromptsDir = "prompts"
+
 // HandleLauncher drives the enforcement loop for a single launcher
 // connection: reads output/idle/exited messages, runs phase detection,
 // and sends type prompts to advance through compile → lint → test.
 func HandleLauncher(ctx context.Context, conn LauncherConn) {
 	defer conn.Close()
-	gate := NewGate(NewOutputBuffer())
+	gate := NewGate(NewOutputBuffer(), NewPromptLoader(DefaultPromptsDir))
 
 	for {
 		select {
