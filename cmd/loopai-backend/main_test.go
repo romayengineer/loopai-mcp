@@ -99,23 +99,29 @@ func TestPidStopRunning(t *testing.T) {
 	dir := socketDir(t, "stoprunning")
 	sp := filepath.Join(dir, "loopai.sock")
 
-	// Start a fake "backend" process
-	cmd := exec.Command("sh", "-c", "trap '' TERM; while true; do sleep 1; done")
+	// Start a helper process that cleans up the pid file on SIGTERM
+	pidPath := filepath.Join(dir, "loopai.pid")
+	helper := fmt.Sprintf(`
+		P=%s
+		echo "$$" > "$P"
+		trap 'rm -f "$P"; exit 0' TERM
+		while true; do sleep 1; done
+	`, pidPath)
+	cmd := exec.Command("sh", "-c", helper)
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start helper: %v", err)
 	}
 	defer cmd.Process.Kill()
 
-	// Write its pid to the pid file
-	pidPath := filepath.Join(dir, "loopai.pid")
-	if err := os.WriteFile(pidPath, []byte(fmt.Sprintf("%d\n", cmd.Process.Pid)), 0644); err != nil {
-		t.Fatalf("write pid: %v", err)
+	// Wait for the helper to write its pid
+	time.Sleep(50 * time.Millisecond)
+
+	// stopBackend sends SIGTERM and waits for pid file to disappear
+	if err := stopBackend(sp); err != nil {
+		t.Fatalf("stopBackend: %v", err)
 	}
 
-	// stopBackend sends SIGTERM and removes the pid file
-	stopBackend(sp)
-
-	// Verify pid file was removed
+	// Verify pid file was removed by the helper's trap
 	if _, err := os.Stat(pidPath); !os.IsNotExist(err) {
 		t.Fatalf("expected pid file to be removed, got: %v", err)
 	}

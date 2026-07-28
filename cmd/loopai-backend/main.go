@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/romayengineer/loopai-mcp/internal/backend"
 	"github.com/romayengineer/loopai-mcp/internal/proto"
@@ -64,18 +65,23 @@ func stopBackend(socketPath string) error {
 
 	proc, err := os.FindProcess(pid)
 	if err != nil {
-		os.Remove(pidPath)
 		return fmt.Errorf("process %d not found: %w", pid, err)
 	}
 
 	if err := proc.Signal(syscall.SIGTERM); err != nil {
-		os.Remove(pidPath)
 		return fmt.Errorf("stop PID %d: %w", pid, err)
 	}
 
-	os.Remove(pidPath)
-	slog.Info("backend stopped", "pid", pid)
-	return nil
+	// Wait for the pid file to disappear. The backend's defer os.Remove(pidPath)
+	// runs after signal handler cancels the context + stops the listener.
+	for i := 0; i < 30; i++ {
+		if _, err := os.Stat(pidPath); os.IsNotExist(err) {
+			slog.Info("backend stopped", "pid", pid)
+			return nil
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return fmt.Errorf("PID %d did not stop within 3s (check %s)", pid, socketPath)
 }
 
 func main() {
@@ -101,15 +107,17 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	b := backend.New(*socketPath, backend.HandleLauncher)
+
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		sig := <-sigCh
 		slog.Info("shutting down", "signal", sig)
 		cancel()
+		b.Stop()
 	}()
 
-	b := backend.New(*socketPath, backend.HandleLauncher)
 	if err := b.Run(ctx); err != nil {
 		slog.Error("backend", "error", err)
 		os.Exit(1)
