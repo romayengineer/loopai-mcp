@@ -33,8 +33,8 @@ func StripANSI(data []byte) []byte {
 			// OSC sequence: ESC ] ... ST (BEL or ESC \)
 			i = skipOSC(data, i+1)
 
-		case data[i] == 'P' || data[i] == '_' || data[i] == '^':
-			// DCS, APC, PM sequences: terminated by ST (ESC \)
+		case data[i] == 'P' || data[i] == '_' || data[i] == '^' || data[i] == 'X':
+			// DCS, SOS, PM, APC: terminated by ST (ESC \)
 			i = skipST(data, i+1)
 
 		case data[i] >= ' ' && data[i] <= '/':

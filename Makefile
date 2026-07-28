@@ -13,7 +13,7 @@ vet:
 	go vet ./internal/... ./cmd/...
 
 test-unit:
-	go test ./internal/... -count=1 -timeout 30s
+	go test -race ./internal/... -count=1 -timeout 30s
 
 test-integration:
 	go test -tags=integration ./internal/... -count=1 -timeout 30s

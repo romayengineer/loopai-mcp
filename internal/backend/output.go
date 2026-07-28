@@ -6,9 +6,9 @@ import (
 )
 
 type OutputBuffer struct {
-	mu     sync.Mutex
-	buf    strings.Builder
-	phase  Phase
+	mu    sync.Mutex
+	buf   strings.Builder
+	phase Phase
 }
 
 func NewOutputBuffer() *OutputBuffer {
