@@ -14,6 +14,8 @@ type OutputBuffer struct {
 }
 
 // NewOutputBuffer creates an empty output buffer.
+// The zero value of OutputBuffer is also usable since sync.Mutex
+// and strings.Builder both have useful zero values.
 func NewOutputBuffer() *OutputBuffer {
 	return &OutputBuffer{}
 }

@@ -27,7 +27,7 @@ func e2eSocketPath(t *testing.T, name string) string {
 	return path
 }
 
-func startE2EBackend(t *testing.T, socketPath string, handler func(context.Context, *proto.Conn)) *backend.Backend {
+func startE2EBackend(t *testing.T, socketPath string, handler func(context.Context, backend.LauncherConn)) *backend.Backend {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	b := backend.New(socketPath, handler)
@@ -52,10 +52,10 @@ func TestEndToEndEcho(t *testing.T) {
 		outputData string
 	)
 
-	handler := func(ctx context.Context, pc *proto.Conn) {
-		defer pc.Close()
+	handler := func(ctx context.Context, conn backend.LauncherConn) {
+		defer conn.Close()
 		for {
-			msg, err := pc.Receive(ctx)
+			msg, err := conn.Receive(ctx)
 			if err != nil {
 				return
 			}
@@ -73,7 +73,7 @@ func TestEndToEndEcho(t *testing.T) {
 					mu.Unlock()
 					return
 				}
-				if err := pc.Send(ctx, reply); err != nil {
+				if err := conn.Send(ctx, reply); err != nil {
 					mu.Unlock()
 					return
 				}
@@ -180,10 +180,10 @@ func TestEndToEndExitCode(t *testing.T) {
 		mu       sync.Mutex
 	)
 
-	handler := func(ctx context.Context, pc *proto.Conn) {
-		defer pc.Close()
+	handler := func(ctx context.Context, conn backend.LauncherConn) {
+		defer conn.Close()
 		for {
-			msg, err := pc.Receive(ctx)
+			msg, err := conn.Receive(ctx)
 			if err != nil {
 				return
 			}
@@ -263,10 +263,10 @@ func TestEndToEndOutputStreaming(t *testing.T) {
 	var outputChunks []string
 	var mu sync.Mutex
 
-	handler := func(ctx context.Context, pc *proto.Conn) {
-		defer pc.Close()
+	handler := func(ctx context.Context, conn backend.LauncherConn) {
+		defer conn.Close()
 		for {
-			msg, err := pc.Receive(ctx)
+			msg, err := conn.Receive(ctx)
 			if err != nil {
 				return
 			}

@@ -29,7 +29,7 @@ type loopHarness struct {
 	done      chan struct{}
 }
 
-func startLoopHarness(t *testing.T, ctx context.Context, socketPath string, handler func(context.Context, *proto.Conn)) *loopHarness {
+func startLoopHarness(t *testing.T, ctx context.Context, socketPath string, handler func(context.Context, LauncherConn)) *loopHarness {
 	t.Helper()
 
 	ctx, cancel := context.WithCancel(ctx)

@@ -22,7 +22,7 @@ func socketPath(t *testing.T, name string) string {
 	return path
 }
 
-func startTestBackend(t *testing.T, sp string, handler func(context.Context, *proto.Conn)) *Backend {
+func startTestBackend(t *testing.T, sp string, handler func(context.Context, LauncherConn)) *Backend {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	b := New(sp, handler)
@@ -40,9 +40,9 @@ func TestBackendAcceptsLauncher(t *testing.T) {
 	sp := socketPath(t, "accept.sock")
 
 	var started atomic.Bool
-	handler := func(ctx context.Context, pc *proto.Conn) {
-		defer pc.Close()
-		msg, err := pc.Receive(ctx)
+	handler := func(ctx context.Context, conn LauncherConn) {
+		defer conn.Close()
+		msg, err := conn.Receive(ctx)
 		if err != nil {
 			t.Errorf("receive: %v", err)
 			return
@@ -57,7 +57,7 @@ func TestBackendAcceptsLauncher(t *testing.T) {
 			t.Errorf("new message: %v", mErr)
 			return
 		}
-		if err := pc.Send(ctx, reply); err != nil {
+		if err := conn.Send(ctx, reply); err != nil {
 			t.Errorf("send reply: %v", err)
 		}
 	}
@@ -96,10 +96,10 @@ func TestBackendAcceptsLauncher(t *testing.T) {
 func TestBackendFullExchange(t *testing.T) {
 	sp := socketPath(t, "full.sock")
 
-	handler := func(ctx context.Context, pc *proto.Conn) {
-		defer pc.Close()
+	handler := func(ctx context.Context, conn LauncherConn) {
+		defer conn.Close()
 		for {
-			msg, err := pc.Receive(ctx)
+			msg, err := conn.Receive(ctx)
 			if err != nil {
 				return
 			}

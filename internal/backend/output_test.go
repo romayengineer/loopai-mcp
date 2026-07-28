@@ -36,54 +36,69 @@ func TestNoTriggerOnNormalOutput(t *testing.T) {
 	}
 }
 
-func TestAnalyzeGoBuildError(t *testing.T) {
-	out := `# github.com/user/repo/pkg
-./main.go:23:2: undefined: Foo
-./main.go:25:9: cannot use Bar (type string) as type int`
-	r := analyzeOutput(out, PhaseCompile)
-	if r != ResultFailure {
-		t.Fatalf("expected ResultFailure, got %s", r)
+func TestAnalyzeOutput(t *testing.T) {
+	tests := []struct {
+		name  string
+		ouput string
+		phase Phase
+		want  PhaseResult
+	}{
+		{
+			name:  "compile error",
+			ouput: "# github.com/user/repo/pkg\n./main.go:23:2: undefined: Foo\n./main.go:25:9: cannot use Bar (type string) as type int",
+			phase: PhaseCompile,
+			want:  ResultFailure,
+		},
+		{
+			name:  "compile vet error",
+			ouput: "./handler.go:42:2: unreachable code",
+			phase: PhaseCompile,
+			want:  ResultFailure,
+		},
+		{
+			name:  "compile empty output success",
+			ouput: "",
+			phase: PhaseCompile,
+			want:  ResultSuccess,
+		},
+		{
+			name:  "test pass",
+			ouput: "ok  github.com/pkg/foo\t0.234s\n",
+			phase: PhaseTest,
+			want:  ResultSuccess,
+		},
+		{
+			name:  "test fail",
+			ouput: "--- FAIL: TestFoo\n    foo_test.go:10: expected 3, got 5\nFAIL",
+			phase: PhaseTest,
+			want:  ResultFailure,
+		},
+		{
+			name:  "test data race",
+			ouput: "WARNING: DATA RACE\nWrite at 0x123 by goroutine 5:",
+			phase: PhaseTest,
+			want:  ResultFailure,
+		},
+		{
+			name:  "lint error",
+			ouput: "main.go:23:2: unused: variable x is unused",
+			phase: PhaseLint,
+			want:  ResultFailure,
+		},
+		{
+			name:  "unknown phase returns unknown",
+			ouput: "some random output",
+			phase: PhaseUnknown,
+			want:  ResultUnknown,
+		},
 	}
-}
-
-func TestAnalyzeGoTestPass(t *testing.T) {
-	out := "ok  github.com/pkg/foo\t0.234s\n"
-	r := analyzeOutput(out, PhaseTest)
-	if r != ResultSuccess {
-		t.Fatalf("expected ResultSuccess, got %s", r)
-	}
-}
-
-func TestAnalyzeGoTestFail(t *testing.T) {
-	out := `--- FAIL: TestFoo
-    foo_test.go:10: expected 3, got 5
-FAIL`
-	r := analyzeOutput(out, PhaseTest)
-	if r != ResultFailure {
-		t.Fatalf("expected ResultFailure, got %s", r)
-	}
-}
-
-func TestAnalyzeGoTestRace(t *testing.T) {
-	out := `WARNING: DATA RACE
-Write at 0x123 by goroutine 5:`
-	r := analyzeOutput(out, PhaseTest)
-	if r != ResultFailure {
-		t.Fatalf("expected ResultFailure, got %s", r)
-	}
-}
-
-func TestAnalyzeEmptyCompileOutput(t *testing.T) {
-	r := analyzeOutput("", PhaseCompile)
-	if r != ResultSuccess {
-		t.Fatalf("expected ResultSuccess (no errors = success), got %s", r)
-	}
-}
-
-func TestAnalyzeUnknownPhase(t *testing.T) {
-	r := analyzeOutput("some random output", PhaseUnknown)
-	if r != ResultUnknown {
-		t.Fatalf("expected ResultUnknown, got %s", r)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := analyzeOutput(tt.ouput, tt.phase)
+			if got != tt.want {
+				t.Fatalf("analyzeOutput(phase=%s): got %s, want %s", tt.phase, got, tt.want)
+			}
+		})
 	}
 }
 

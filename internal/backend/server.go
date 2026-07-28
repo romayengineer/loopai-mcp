@@ -13,16 +13,24 @@ import (
 	"github.com/romayengineer/loopai-mcp/internal/proto"
 )
 
+// LauncherConn is the interface that a launcher connection must satisfy.
+// It decouples the enforcement loop from the underlying transport.
+type LauncherConn interface {
+	Send(context.Context, proto.Message) error
+	Receive(context.Context) (proto.Message, error)
+	Close() error
+}
+
 // Backend is the LoopAI-MCP server. It listens on a Unix socket,
 // accepts launcher connections, and dispatches each to a handler.
 type Backend struct {
 	socketPath string
-	handler    func(context.Context, *proto.Conn)
+	handler    func(context.Context, LauncherConn)
 	ln         atomic.Value // stores net.Listener
 }
 
 // New creates a Backend that will listen on the given socket path.
-func New(socketPath string, handler func(context.Context, *proto.Conn)) *Backend {
+func New(socketPath string, handler func(context.Context, LauncherConn)) *Backend {
 	return &Backend{
 		socketPath: socketPath,
 		handler:    handler,

@@ -36,7 +36,6 @@ type PtyProcess struct {
 	Cmd      *exec.Cmd
 	done     chan struct{}
 	exitCode atomic.Int64
-	exitErr  atomic.Value // stores error
 }
 
 // Spawn starts a client binary inside a PTY and returns a PtyProcess
@@ -63,10 +62,7 @@ func Spawn(client string, args []string) (*PtyProcess, error) {
 	p.exitCode.Store(-1)
 
 	go func() {
-		waitErr := cmd.Wait()
-		if waitErr != nil {
-			p.exitErr.Store(waitErr)
-		}
+		cmd.Wait()
 		if cmd.ProcessState != nil {
 			state := cmd.ProcessState
 			if status, ok := state.Sys().(syscall.WaitStatus); ok {

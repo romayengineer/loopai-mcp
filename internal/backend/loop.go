@@ -31,8 +31,8 @@ func NewGate() *Gate {
 // HandleLauncher drives the enforcement loop for a single launcher
 // connection: reads output/idle/exited messages, runs phase detection,
 // and sends type prompts to advance through compile → lint → test.
-func HandleLauncher(ctx context.Context, pc *proto.Conn) {
-	defer pc.Close()
+func HandleLauncher(ctx context.Context, conn LauncherConn) {
+	defer conn.Close()
 	gate := NewGate()
 
 	for {
@@ -42,7 +42,7 @@ func HandleLauncher(ctx context.Context, pc *proto.Conn) {
 		default:
 		}
 
-		msg, err := pc.Receive(ctx)
+		msg, err := conn.Receive(ctx)
 		if err != nil {
 			slog.Debug("launcher disconnected", "error", err)
 			return
@@ -58,7 +58,7 @@ func HandleLauncher(ctx context.Context, pc *proto.Conn) {
 			gate.handleOutput(p.Data)
 
 		case proto.MsgIdle:
-			gate.handleIdle(ctx, pc)
+			gate.handleIdle(ctx, conn)
 
 		case proto.MsgExited:
 			var p proto.ExitedPayload
@@ -87,7 +87,7 @@ func (g *Gate) handleOutput(data []byte) {
 	g.output.Write(data)
 }
 
-func (g *Gate) handleIdle(ctx context.Context, pc *proto.Conn) {
+func (g *Gate) handleIdle(ctx context.Context, conn LauncherConn) {
 	result := g.output.Analyze()
 	phase := result.Phase
 	res := result.Result
@@ -106,7 +106,7 @@ func (g *Gate) handleIdle(ctx context.Context, pc *proto.Conn) {
 			slog.Warn("marshal message", "error", mErr)
 			return
 		}
-		if err := pc.Send(ctx, msg); err != nil {
+		if err := conn.Send(ctx, msg); err != nil {
 			slog.Warn("send failed", "error", err)
 		}
 	}
