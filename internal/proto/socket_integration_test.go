@@ -218,3 +218,33 @@ func TestSocketBinaryPayload(t *testing.T) {
 		t.Fatalf("unexpected binary data: %v", p.Data)
 	}
 }
+
+func TestListenInvalidPath(t *testing.T) {
+	_, err := proto.Listen("/nonexistent_dir/socket.sock")
+	if err == nil {
+		t.Fatal("expected error for Listen with invalid parent directory path")
+	}
+}
+
+func TestConnectNonexistentSocket(t *testing.T) {
+	_, err := proto.Connect("/tmp/loopai-test-nonexistent-12345.sock")
+	if err == nil {
+		t.Fatal("expected error for Connect to nonexistent socket")
+	}
+}
+
+func TestListenStaleSocketRemoved(t *testing.T) {
+	sp := socketPath(t, "stale2.sock")
+	// Create a stale file (not a socket)
+	if err := os.WriteFile(sp, []byte("stale data"), 0644); err != nil {
+		t.Fatalf("write stale: %v", err)
+	}
+
+	ln, err := proto.Listen(sp)
+	if err != nil {
+		t.Fatalf("listen after removing stale: %v", err)
+	}
+	if err := ln.Close(); err != nil {
+		t.Errorf("close: %v", err)
+	}
+}

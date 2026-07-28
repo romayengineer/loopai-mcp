@@ -119,6 +119,13 @@ func ExampleNewMessage() {
 	// Output:
 }
 
+func TestNewMessageMarshalError(t *testing.T) {
+	_, err := proto.NewMessage(proto.MsgStarted, make(chan int))
+	if err == nil {
+		t.Fatal("expected marshal error for unmarshalable payload")
+	}
+}
+
 func TestExitedPayload(t *testing.T) {
 	msg, err := proto.NewMessage(proto.MsgExited, proto.ExitedPayload{Code: 1, Signal: "SIGTERM"})
 	if err != nil {

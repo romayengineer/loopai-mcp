@@ -90,3 +90,75 @@ func BenchmarkStripANSIComplex(b *testing.B) {
 		StripANSI(data)
 	}
 }
+
+func TestStripANSIDCS(t *testing.T) {
+	// DCS: ESC P ... ST(ESC \)
+	in := []byte("before\x1bP12345678\x1b\\after")
+	got := StripANSI(in)
+	if string(got) != "beforeafter" {
+		t.Fatalf("expected 'beforeafter', got %q", got)
+	}
+}
+
+func TestStripANSISOS(t *testing.T) {
+	// SOS: ESC X ... ST(ESC \)
+	in := []byte("before\x1bXsos data\x1b\\after")
+	got := StripANSI(in)
+	if string(got) != "beforeafter" {
+		t.Fatalf("expected 'beforeafter', got %q", got)
+	}
+}
+
+func TestStripANSIPM(t *testing.T) {
+	// PM: ESC ^ ... ST(ESC \)
+	in := []byte("before\x1b^pm data\x1b\\after")
+	got := StripANSI(in)
+	if string(got) != "beforeafter" {
+		t.Fatalf("expected 'beforeafter', got %q", got)
+	}
+}
+
+func TestStripANSIAPC(t *testing.T) {
+	// APC: ESC _ ... ST(ESC \)
+	in := []byte("before\x1b_apc data\x1b\\after")
+	got := StripANSI(in)
+	if string(got) != "beforeafter" {
+		t.Fatalf("expected 'beforeafter', got %q", got)
+	}
+}
+
+func TestStripANSITwoCharEscape(t *testing.T) {
+	// Two-character escapes: ESC 7 (save cursor), ESC 8 (restore cursor)
+	in := []byte("a\x1b7b\x1b8c")
+	got := StripANSI(in)
+	if string(got) != "abc" {
+		t.Fatalf("expected 'abc', got %q", got)
+	}
+}
+
+func TestStripANSISingleCharEscape(t *testing.T) {
+	// Single-character escapes: ESC D (index), ESC M (reverse index), ESC c (reset)
+	in := []byte("a\x1bDb\x1bMc\x1bcd")
+	got := StripANSI(in)
+	if string(got) != "abcd" {
+		t.Fatalf("expected 'abcd', got %q", got)
+	}
+}
+
+func TestStripANSIIncompleteDCS(t *testing.T) {
+	// DCS without ST terminator at end of data
+	in := []byte("before\x1bPunfinished")
+	got := StripANSI(in)
+	if string(got) != "before" {
+		t.Fatalf("expected 'before', got %q", got)
+	}
+}
+
+func TestStripANSIOnlyEscape(t *testing.T) {
+	// Input that is ONLY escape sequences should produce empty output
+	in := []byte("\x1b[31m\x1b[1m\x1b[0m")
+	got := StripANSI(in)
+	if len(got) != 0 {
+		t.Fatalf("expected empty, got %q", got)
+	}
+}

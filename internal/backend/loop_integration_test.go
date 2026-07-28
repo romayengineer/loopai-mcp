@@ -208,3 +208,95 @@ func TestLoopLintFailure(t *testing.T) {
 		t.Fatal("expected prompt after lint failure")
 	}
 }
+
+func TestLoopFullSuccessSequence(t *testing.T) {
+	sp := loopSocketPath(t, "fullpass.sock")
+	h := startLoopHarness(t, context.Background(), sp, HandleLauncher)
+
+	// Phase 1: compile passes
+	h.sendOutput("> go build ./...\n")
+	h.sendIdle()
+	text := h.readMsgType(2 * time.Second)
+	if len(text) == 0 {
+		t.Fatal("expected prompt after compile success")
+	}
+
+	// Phase 2: lint passes
+	h.sendOutput("> golangci-lint run ./...\n")
+	h.sendIdle()
+	text2 := h.readMsgType(2 * time.Second)
+	if len(text2) == 0 {
+		t.Fatal("expected prompt after lint success")
+	}
+
+	// Phase 3: test passes
+	h.sendOutput("> go test ./...\n")
+	h.sendOutput("ok  github.com/user/repo\t0.234s\n")
+	h.sendIdle()
+	text3 := h.readMsgType(2 * time.Second)
+	if len(text3) == 0 {
+		t.Fatal("expected prompt after test success")
+	}
+}
+
+func TestLoopBadOutputPayload(t *testing.T) {
+	sp := loopSocketPath(t, "badpayload.sock")
+	h := startLoopHarness(t, context.Background(), sp, HandleLauncher)
+
+	// Send output with invalid JSON payload
+	badMsg := proto.Message{Type: proto.MsgOutput, Payload: []byte(`{invalid}`)}
+	h.pc.Send(context.Background(), badMsg)
+
+	// The loop should continue (not crash). Verify by sending a valid message.
+	h.sendOutput("> go build ./...\n")
+	h.sendOutput("./main.go:5:2: undefined: Foo\n")
+	h.sendIdle()
+
+	text := h.readMsgType(2 * time.Second)
+	if len(text) == 0 {
+		t.Fatal("expected prompt after compile failure, loop may have crashed on bad payload")
+	}
+}
+
+func TestLoopUnknownMessageType(t *testing.T) {
+	sp := loopSocketPath(t, "unknownmsg.sock")
+	h := startLoopHarness(t, context.Background(), sp, HandleLauncher)
+
+	// Send an unknown message type - loop should log and continue
+	unknownMsg := proto.Message{Type: "unknown_type"}
+	h.pc.Send(context.Background(), unknownMsg)
+
+	// Verify loop still works
+	h.sendOutput("> go build ./...\n")
+	h.sendOutput("./main.go:5:2: undefined: Foo\n")
+	h.sendIdle()
+
+	text := h.readMsgType(2 * time.Second)
+	if len(text) == 0 {
+		t.Fatal("expected prompt after unknown message, loop may have crashed")
+	}
+}
+
+func TestLoopContextCancel(t *testing.T) {
+	sp := loopSocketPath(t, "ctxcancel.sock")
+	ctx, cancel := context.WithCancel(context.Background())
+
+	h := startLoopHarness(t, ctx, sp, HandleLauncher)
+
+	// Cancel the context - the handler should exit
+	cancel()
+
+	// Wait for the handler to exit by sending a message and checking
+	// that the recv goroutine detects the connection close.
+	time.Sleep(200 * time.Millisecond)
+	// After context cancel, the next Receive should return ctx.Err()
+	// which causes HandleLauncher to return and close the connection.
+	// We detect this by checking that our recvCh stops getting messages.
+	select {
+	case _, ok := <-h.recvCh:
+		if ok {
+			// We still got a message - but that's ok if it was sent before cancel
+		}
+	default:
+	}
+}

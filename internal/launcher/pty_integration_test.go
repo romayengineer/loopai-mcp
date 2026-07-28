@@ -157,3 +157,56 @@ func TestSpawnSignalInterrupt(t *testing.T) {
 		t.Fatal("timeout waiting for process to exit after signal")
 	}
 }
+
+func TestPtyProcessResize(t *testing.T) {
+	proc, err := Spawn("sh", []string{"-c", "stty -a; sleep 10"})
+	if err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+	defer proc.Close()
+
+	// Resize to explicit dimensions
+	pp, ok := proc.(*PtyProcess)
+	if !ok {
+		t.Fatal("spawn did not return *PtyProcess")
+	}
+	if err := pp.Resize(20, 80); err != nil {
+		t.Fatalf("resize: %v", err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify resize took effect by checking output
+	var buf bytes.Buffer
+	_, err = io.Copy(&buf, proc)
+	if err != nil && err != io.EOF {
+		t.Fatalf("read PTY: %v", err)
+	}
+	<-proc.Wait()
+
+	output := buf.String()
+	if !strings.Contains(output, "rows 20;") && !strings.Contains(output, "rows 20") {
+		t.Fatalf("expected stty output to show rows 20, got: %q", output)
+	}
+	if !strings.Contains(output, "columns 80;") && !strings.Contains(output, "columns 80") {
+		t.Fatalf("expected stty output to show columns 80, got: %q", output)
+	}
+}
+
+func TestPtyProcessCloseWhenDone(t *testing.T) {
+	// Verify that Close doesn't panic when the process has already exited.
+	proc, err := Spawn("echo", []string{"done"})
+	if err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+	io.Copy(io.Discard, proc)
+	<-proc.Wait()
+
+	if err := proc.Close(); err != nil {
+		t.Fatalf("close after exit: %v", err)
+	}
+	// Closing again should not panic
+	if err := proc.Close(); err == nil {
+		t.Log("second close returned nil (expected with already-closed PTY)")
+	}
+}
