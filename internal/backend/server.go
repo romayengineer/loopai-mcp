@@ -21,12 +21,26 @@ type LauncherConn interface {
 	Close() error
 }
 
+// SocketListener creates a named Unix socket listener.
+// Decouples Backend from the concrete proto.Listen implementation.
+type SocketListener interface {
+	Listen(socketPath string) (net.Listener, error)
+}
+
+// socketListenFunc adapts a function to the SocketListener interface.
+type socketListenFunc func(string) (net.Listener, error)
+
+func (f socketListenFunc) Listen(socketPath string) (net.Listener, error) {
+	return f(socketPath)
+}
+
 // Backend is the LoopAI-MCP server. It listens on a Unix socket,
 // accepts launcher connections, and dispatches each to a handler.
 type Backend struct {
 	socketPath string
 	handler    func(context.Context, LauncherConn)
 	ln         atomic.Value // stores net.Listener
+	listener   SocketListener
 }
 
 // New creates a Backend that will listen on the given socket path.
@@ -34,13 +48,14 @@ func New(socketPath string, handler func(context.Context, LauncherConn)) *Backen
 	return &Backend{
 		socketPath: socketPath,
 		handler:    handler,
+		listener:   socketListenFunc(proto.Listen),
 	}
 }
 
 // Run starts the Unix socket accept loop. It blocks until the context
 // is cancelled, an accept error occurs, or the listener is closed.
 func (b *Backend) Run(ctx context.Context) error {
-	ln, err := proto.Listen(b.socketPath)
+	ln, err := b.listener.Listen(b.socketPath)
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}
