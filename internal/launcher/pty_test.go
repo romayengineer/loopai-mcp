@@ -1,6 +1,7 @@
 package launcher
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"testing"
@@ -63,8 +64,20 @@ func TestDisablePTYEcho(t *testing.T) {
 	}
 	defer ptm.Close()
 
-	// Verify ECHO is initially enabled
-	termios, err := unix.IoctlGetTermios(int(ptm.Fd()), unix.TCGETS)
+	// Get the slave name so we can check ECHO on the slave directly
+	n, err := unix.IoctlGetInt(int(ptm.Fd()), unix.TIOCGPTN)
+	if err != nil {
+		t.Fatalf("TIOCGPTN: %v", err)
+	}
+	slaveName := fmt.Sprintf("/dev/pts/%d", n)
+	slave, err := os.OpenFile(slaveName, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatalf("open slave: %v", err)
+	}
+	defer slave.Close()
+
+	// Verify ECHO is initially enabled on the slave
+	termios, err := unix.IoctlGetTermios(int(slave.Fd()), unix.TCGETS)
 	if err != nil {
 		t.Fatalf("get termios: %v", err)
 	}
@@ -72,13 +85,13 @@ func TestDisablePTYEcho(t *testing.T) {
 		t.Fatal("expected ECHO to be enabled by default")
 	}
 
-	// Disable ECHO
+	// Disable ECHO via the master
 	if err := DisablePTYEcho(ptm); err != nil {
 		t.Fatalf("DisablePTYEcho: %v", err)
 	}
 
-	// Verify ECHO is now disabled
-	termios, err = unix.IoctlGetTermios(int(ptm.Fd()), unix.TCGETS)
+	// Verify ECHO is now disabled on the slave
+	termios, err = unix.IoctlGetTermios(int(slave.Fd()), unix.TCGETS)
 	if err != nil {
 		t.Fatalf("get termios after disable: %v", err)
 	}

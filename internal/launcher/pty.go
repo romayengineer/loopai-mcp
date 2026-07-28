@@ -42,16 +42,27 @@ const (
 // Disabling ECHO on the PTY eliminates the double-echo and the raw escape
 // artifacts while still letting the client receive all keystrokes normally.
 func DisablePTYEcho(ptm *os.File) error {
-	// Get current terminal attributes via TCGETS ioctl.
-	termios, err := unix.IoctlGetTermios(int(ptm.Fd()), unix.TCGETS)
+	// ECHO is a slave-side terminal flag. We need to open the slave
+	// device and clear ECHO on its termios. Modifying the master's
+	// termios has no effect on echo behavior.
+	n, err := unix.IoctlGetInt(int(ptm.Fd()), unix.TIOCGPTN)
 	if err != nil {
-		return fmt.Errorf("get PTY termios: %w", err)
+		return fmt.Errorf("get pty number: %w", err)
 	}
-	// Clear ECHO bit in the local mode flags.
+	slaveName := fmt.Sprintf("/dev/pts/%d", n)
+	slave, err := os.OpenFile(slaveName, os.O_RDWR, 0)
+	if err != nil {
+		return fmt.Errorf("open slave %s: %w", slaveName, err)
+	}
+	defer slave.Close()
+
+	termios, err := unix.IoctlGetTermios(int(slave.Fd()), unix.TCGETS)
+	if err != nil {
+		return fmt.Errorf("get slave termios: %w", err)
+	}
 	termios.Lflag &^= unix.ECHO
-	// Apply the modified attributes via TCSETS ioctl.
-	if err := unix.IoctlSetTermios(int(ptm.Fd()), unix.TCSETS, termios); err != nil {
-		return fmt.Errorf("set PTY termios: %w", err)
+	if err := unix.IoctlSetTermios(int(slave.Fd()), unix.TCSETS, termios); err != nil {
+		return fmt.Errorf("set slave termios: %w", err)
 	}
 	return nil
 }

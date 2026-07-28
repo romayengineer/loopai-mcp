@@ -345,3 +345,57 @@ func TestPtyProcessCloseWhenDone(t *testing.T) {
 		t.Log("second close returned nil (expected with already-closed PTY)")
 	}
 }
+
+func TestDisablePTYEchoNoEscapeSequences(t *testing.T) {
+	// Spawn a process and disable PTY echo, then simulate a raw terminal
+	// keystroke sequence and verify it is NOT echoed back by the PTY.
+	//
+	// To distinguish PTY echo from process output we send a line that the
+	// process will not reproduce. If ECHO is active, the PTY will output
+	// the raw input before the process outputs anything. If ECHO is off,
+	// only the process output appears.
+	//
+	// The test writes "\nHelloWorld\n". With ECHO on, the first '\n' triggers
+	// the line discipline to flush the input line (which is empty or a partial
+	// buffer), and then the process's read consumes "HelloWorld". The PTY echo
+	// would output the input, including escape sequences.
+	pp, err := PtyProcessFromSpawn("sh", []string{"-c", "read line && echo X${line}X"})
+	if err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+	defer pp.Close()
+
+	if err := pp.DisablePTYEcho(); err != nil {
+		t.Fatalf("DisablePTYEcho: %v", err)
+	}
+
+	time.Sleep(50 * time.Millisecond)
+
+	// Send a distinctive marker that would only appear in output if the PTY
+	// echoed it back. The process reads it and wraps it in X...X.
+	marker := "ESCMARKER\n"
+	if _, err := pp.Write([]byte(marker)); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	<-pp.Wait()
+
+	var buf bytes.Buffer
+	_, err = io.Copy(&buf, pp)
+	if err != nil && err != io.EOF {
+		t.Fatalf("read: %v", err)
+	}
+
+	output := buf.String()
+	// Expected: output contains exactly "XESCMARKERX"
+	// With ECHO active: output contains "ESCMARKER\r\nXESCMARKERX\r\n"
+	// (PTY echo + process output, both with the text)
+	// Count occurrences of the marker to detect double-echo.
+	markerCount := strings.Count(output, "ESCMARKER")
+	if markerCount == 0 {
+		t.Fatalf("process output missing, expected 'XESCMARKERX' in: %q", output)
+	}
+	if markerCount > 1 {
+		t.Fatalf("marker appears %d times — PTY ECHO is still active: %q", markerCount, output)
+	}
+}
