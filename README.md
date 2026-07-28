@@ -75,6 +75,7 @@ The backend watches terminal output. When it detects `go build`/`go test`/`golan
 | `-socket` | `~/.config/loopai/loopai.sock` | Unix socket path |
 | `-idle` | `5s` | Idle timeout before signaling backend |
 | `-passthrough` | `false` | Show PTY output on terminal alongside backend enforcement |
+| `-interactive` | `false` | Interactive mode: stdin → PTY, PTY → terminal (implies `-passthrough`). Use raw terminal for natural interaction with the client. |
 
 ## Enforcement gates
 

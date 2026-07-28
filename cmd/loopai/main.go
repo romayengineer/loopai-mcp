@@ -12,6 +12,7 @@ import (
 
 	"github.com/romayengineer/loopai-mcp/internal/launcher"
 	"github.com/romayengineer/loopai-mcp/internal/proto"
+	"golang.org/x/term"
 )
 
 const defaultIdleTimeout = 5 * time.Second
@@ -21,6 +22,7 @@ func main() {
 	socketPath := flag.String("socket", proto.DefaultSocketPath(), "unix socket path")
 	idleTimeout := flag.Duration("idle", defaultIdleTimeout, "idle timeout before signaling backend")
 	passthrough := flag.Bool("passthrough", false, "show PTY output on terminal")
+	interactive := flag.Bool("interactive", false, "interactive mode: stdin -> PTY, PTY -> terminal (implies -passthrough)")
 	flag.Parse()
 
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
@@ -79,6 +81,31 @@ func main() {
 		}
 	})
 	idle.Start()
+
+	// Interactive mode: forward stdin -> PTY and enable passthrough
+	if *interactive {
+		*passthrough = true
+
+		if term.IsTerminal(int(os.Stdin.Fd())) {
+			oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
+			if err != nil {
+				slog.Error("raw terminal", "error", err)
+			} else {
+				defer func() {
+					if err := term.Restore(int(os.Stdin.Fd()), oldState); err != nil {
+						slog.Warn("restore terminal", "error", err)
+					}
+				}()
+			}
+		}
+
+		go func() {
+			written, err := io.Copy(proc, os.Stdin)
+			if err != nil {
+				slog.Warn("stdin copy", "written", written, "error", err)
+			}
+		}()
+	}
 
 	// Wrap the PTY reader with optional passthrough to terminal
 	r := io.Reader(proc)
