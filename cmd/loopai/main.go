@@ -27,7 +27,7 @@ func main() {
 
 	conn, err := proto.Connect(*socketPath)
 	if err != nil {
-		slog.Error("connect to backend", "error", err)
+		slog.Error("backend not running — start it with 'loopai-backend'", "error", err)
 		os.Exit(1)
 	}
 	pc := proto.NewConn(conn)

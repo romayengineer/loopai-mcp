@@ -5,8 +5,11 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -19,6 +22,77 @@ func socketPath(t *testing.T, name string) string {
 	os.Remove(path)
 	t.Cleanup(func() { os.Remove(path) })
 	return path
+}
+
+func socketDir(t *testing.T, name string) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "loopai-cmd-test-"+name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	return dir
+}
+
+func TestPidCheckFresh(t *testing.T) {
+	dir := socketDir(t, "pidfresh")
+	sp := filepath.Join(dir, "loopai.sock")
+
+	if err := checkAndWritePID(sp); err != nil {
+		t.Fatalf("expected no error for fresh start, got: %v", err)
+	}
+
+	// Verify pid file was created
+	pidPath := filepath.Join(dir, "loopai.pid")
+	if _, err := os.Stat(pidPath); err != nil {
+		t.Fatalf("expected pid file at %s: %v", pidPath, err)
+	}
+
+	// Cleanup for the next test
+	os.Remove(pidPath)
+}
+
+func TestPidCheckStale(t *testing.T) {
+	dir := socketDir(t, "pidstale")
+	sp := filepath.Join(dir, "loopai.sock")
+	pidPath := filepath.Join(dir, "loopai.pid")
+
+	// Write a pid file with a clearly dead PID
+	if err := os.WriteFile(pidPath, []byte("999999999\n"), 0644); err != nil {
+		t.Fatalf("write stale pid: %v", err)
+	}
+
+	// checkAndWritePID should remove the stale pid and succeed
+	if err := checkAndWritePID(sp); err != nil {
+		t.Fatalf("expected success after removing stale pid, got: %v", err)
+	}
+}
+
+func TestPidCheckRunning(t *testing.T) {
+	dir := socketDir(t, "pidrunning")
+	sp := filepath.Join(dir, "loopai.sock")
+	pidPath := filepath.Join(dir, "loopai.pid")
+
+	// Write our own PID — we are running, so this is a live pid
+	if err := os.WriteFile(pidPath, []byte("999999999\n"), 0644); err != nil {
+		t.Fatalf("write pid: %v", err)
+	}
+	// 999999999 is unlikely to be alive; use a process that's guaranteed running.
+	// Instead, start a background process and use its PID.
+	cmd := exec.Command("sh", "-c", "sleep 30")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start helper: %v", err)
+	}
+	defer cmd.Process.Kill()
+
+	if err := os.WriteFile(pidPath, []byte(fmt.Sprintf("%d\n", cmd.Process.Pid)), 0644); err != nil {
+		t.Fatalf("write live pid: %v", err)
+	}
+
+	err := checkAndWritePID(sp)
+	if err == nil {
+		t.Fatal("expected error when backend is already running, got nil")
+	}
 }
 
 func TestBackendBinaryStartsAndAcceptsConnection(t *testing.T) {
