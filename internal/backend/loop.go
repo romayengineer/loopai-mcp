@@ -16,9 +16,7 @@ const (
 
 // Gate tracks the enforcement state machine across compile/lint/test phases.
 type Gate struct {
-	output      *OutputBuffer
-	pendingLint bool
-	pendingTest bool
+	output *OutputBuffer
 }
 
 // NewGate creates a Gate with a fresh output buffer.

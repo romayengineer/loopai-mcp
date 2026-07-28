@@ -23,6 +23,11 @@ type MessageReceiver interface {
 	Receive(context.Context) (proto.Message, error)
 }
 
+// Resetter can reset an idle timeout or similar timer.
+type Resetter interface {
+	Reset()
+}
+
 // PtyWriter is a PTY that can be written to and signaled.
 type PtyWriter interface {
 	io.Writer
@@ -31,7 +36,7 @@ type PtyWriter interface {
 
 // PipePTYToBackend reads PTY output and forwards it to the backend
 // over the Unix socket. Idle is reset on each chunk of output.
-func PipePTYToBackend(ctx context.Context, sender MessageSender, r io.Reader, resetter interface{ Reset() }) error {
+func PipePTYToBackend(ctx context.Context, sender MessageSender, r io.Reader, resetter Resetter) error {
 	buf := make([]byte, readBufSize)
 	for {
 		select {

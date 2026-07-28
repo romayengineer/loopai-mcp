@@ -62,7 +62,9 @@ func Spawn(client string, args []string) (*PtyProcess, error) {
 	p.exitCode.Store(-1)
 
 	go func() {
-		cmd.Wait()
+		if err := cmd.Wait(); err != nil {
+			slog.Debug("process wait", "error", err)
+		}
 		if cmd.ProcessState != nil {
 			state := cmd.ProcessState
 			if status, ok := state.Sys().(syscall.WaitStatus); ok {

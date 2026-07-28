@@ -2,13 +2,10 @@ version: "2"
 linters:
   enable:
     - errcheck
-    - gosimple
     - govet
     - ineffassign
     - staticcheck
     - unused
-    - gofmt
-    - gci
     - misspell
   exclusions:
     generate:
@@ -25,6 +22,9 @@ formatters:
   enable:
     - gofmt
     - gci
+  settings:
+    gofmt:
+      simplify: true
   exclusions:
     paths:
       - _test\.go$
