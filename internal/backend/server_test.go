@@ -57,8 +57,8 @@ func TestBackendRunContextCancel(t *testing.T) {
 	cancel()
 
 	err := b.Run(ctx)
-	if err != nil {
-		t.Fatalf("expected nil after cancelled context, got %v", err)
+	if err != context.Canceled {
+		t.Fatalf("expected context.Canceled after cancelled context, got %v", err)
 	}
 }
 

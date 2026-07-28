@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -91,5 +92,116 @@ func TestGatePatternsNonNull(t *testing.T) {
 	}
 	if patterns := gatePatterns(PhaseUnknown); patterns != nil {
 		t.Errorf("gatePatterns(PhaseUnknown) should return nil, got %v", patterns)
+	}
+}
+
+func TestExtractErrorLines(t *testing.T) {
+	tests := []struct {
+		name     string
+		output   string
+		phase    Phase
+		expected string
+		contains []string // optional: expected substrings
+	}{
+		{
+			name:     "compile error",
+			output:   "# github.com/user/repo/pkg\n./main.go:23:2: undefined: Foo\nsome info text\n",
+			phase:    PhaseCompile,
+			expected: "# github.com/user/repo/pkg\n./main.go:23:2: undefined: Foo",
+		},
+		{
+			name:     "compile no error",
+			output:   "> go build ./...",
+			phase:    PhaseCompile,
+			expected: "",
+		},
+		{
+			name:     "test failure",
+			output:   "--- FAIL: TestFoo\n\tfoo_test.go:10: got 4, want 5\nFAIL\nok  github.com/bar\t0.2s\n",
+			phase:    PhaseTest,
+			expected: "--- FAIL: TestFoo\n\tfoo_test.go:10: got 4, want 5",
+		},
+		{
+			name:     "test pass extracts nothing",
+			output:   "ok  github.com/user/repo\t0.234s\n",
+			phase:    PhaseTest,
+			expected: "",
+		},
+		{
+			name:     "lint error",
+			output:   "main.go:23:2: unused: variable x is unused\ninternal/handler.go:42:6: exported func is unused\n",
+			phase:    PhaseLint,
+			expected: "main.go:23:2: unused: variable x is unused\ninternal/handler.go:42:6: exported func is unused",
+		},
+		{
+			name:     "unknown phase returns full output",
+			output:   "some random text\nmore text\n",
+			phase:    PhaseUnknown,
+			expected: "some random text\nmore text",
+			contains: []string{"some random text", "more text"},
+		},
+		{
+			name:     "empty output",
+			output:   "",
+			phase:    PhaseCompile,
+			expected: "",
+		},
+		{
+			name:     "data race detection",
+			output:   "WARNING: DATA RACE\nWrite at 0x123 by goroutine 5:\n  main.go:42\n",
+			phase:    PhaseTest,
+			contains: []string{"WARNING: DATA RACE"},
+		},
+		{
+			name:     "compile vet error",
+			output:   "# github.com/user/repo\n./handler.go:42:2: unreachable code\n",
+			phase:    PhaseCompile,
+			expected: "# github.com/user/repo\n./handler.go:42:2: unreachable code",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractErrorLines(tt.output, tt.phase)
+			if tt.expected != "" && got != tt.expected {
+				t.Errorf("extractErrorLines:\ngot:\n%q\nwant:\n%q", got, tt.expected)
+			}
+			for _, substr := range tt.contains {
+				if !strings.Contains(got, substr) {
+					t.Errorf("expected result to contain %q, got:\n%q", substr, got)
+				}
+			}
+		})
+	}
+}
+
+func TestExtractErrorLinesMax(t *testing.T) {
+	output := "# github.com/user/repo/pkg\n./main.go:23:2: undefined: Foo\n"
+	gotFull := extractErrorLines(output, PhaseCompile)
+	// Both lines are error matches, so they're both kept
+	if !strings.Contains(gotFull, "# github.com") || !strings.Contains(gotFull, "main.go:23") {
+		t.Fatalf("expected error lines, got %q", gotFull)
+	}
+
+	gotCapped := extractErrorLinesMax(output, PhaseCompile, 10)
+	if len(gotCapped) > 10 {
+		t.Fatalf("expected max 10 bytes, got %d: %q", len(gotCapped), gotCapped)
+	}
+}
+
+func TestExtractErrorLinesUnknownPhaseFullOutput(t *testing.T) {
+	output := "some random output\nwithout errors\n"
+	got := extractErrorLines(output, PhaseUnknown)
+	// Trailing newline is trimmed
+	expected := "some random output\nwithout errors"
+	if got != expected {
+		t.Errorf("expected %q for unknown phase, got %q", expected, got)
+	}
+}
+
+func TestExtractErrorLinesMaxUnderLimit(t *testing.T) {
+	output := "WARNING: DATA RACE"
+	got := extractErrorLinesMax(output, PhaseTest, 1_000_000)
+	if got != output {
+		t.Errorf("expected full output when under limit, got %q", got)
 	}
 }

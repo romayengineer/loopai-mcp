@@ -1,3 +1,6 @@
+// Package launcher provides PTY lifecycle and I/O streaming for spawning
+// TUI agent clients (Claude Code, OpenCode, etc.) in a pseudo-terminal and
+// piping their output to a backend over a Unix socket.
 package launcher
 
 import (
@@ -17,6 +20,8 @@ type IdleTimer interface {
 
 // IdleDetector fires a callback after a configurable period of inactivity.
 // Reset can be called to extend the idle window (e.g. on each byte of output).
+//
+// The zero value is not usable; use NewIdleDetector to create one.
 type IdleDetector struct {
 	mu      sync.Mutex
 	timeout time.Duration
@@ -66,8 +71,17 @@ func (d *IdleDetector) Stop() {
 	slog.Debug("idle detector stopped")
 }
 
+// fire is called by the timer goroutine. It checks the running state
+// under the mutex to minimize the race window with Stop(). Because the
+// callback is called outside the lock (to prevent deadlock if the
+// callback calls Reset()), a small race window remains, but the callback
+// MUST be resilient to false triggers (e.g., by checking ctx.Err()
+// before sending on a connection that may be closing).
 func (d *IdleDetector) fire() {
-	if !d.running.Load() {
+	d.mu.Lock()
+	running := d.running.Load()
+	d.mu.Unlock()
+	if !running {
 		return
 	}
 	slog.Debug("idle detector fired", "timeout", d.timeout)

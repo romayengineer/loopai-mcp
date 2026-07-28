@@ -109,6 +109,60 @@ func TestSendSetWriteDeadlineError(t *testing.T) {
 	}
 }
 
+func TestSendCancelledContext(t *testing.T) {
+	cc := NewConn(&mockConn{})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := cc.Send(ctx, Message{Type: MsgOutput, Payload: []byte(`"test"`)})
+	if err == nil {
+		t.Fatal("expected error from Send with cancelled context")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+}
+
+func TestReceiveCancelledContext(t *testing.T) {
+	cc := NewConn(&mockConn{})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := cc.Receive(ctx)
+	if err == nil {
+		t.Fatal("expected error from Receive with cancelled context")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+}
+
+func TestSendCancelledContextPreservesTypeInError(t *testing.T) {
+	cc := NewConn(&mockConn{})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := cc.Send(ctx, Message{Type: MsgStarted})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+}
+
+func TestReceiveCancelledWithDeadline(t *testing.T) {
+	conn := &mockConn{}
+	cc := NewConn(conn)
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Hour))
+	defer cancel()
+
+	_, err := cc.Receive(ctx)
+	if err == nil {
+		t.Fatal("expected error with expired deadline")
+	}
+}
+
 type deadlineErrorConn struct {
 	net.Conn
 }

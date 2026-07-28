@@ -54,6 +54,8 @@ func New(socketPath string, handler func(context.Context, LauncherConn)) *Backen
 
 // Run starts the Unix socket accept loop. It blocks until the context
 // is cancelled, an accept error occurs, or the listener is closed.
+// The context is checked before and after each Accept call to ensure
+// prompt shutdown when Stop() is called concurrently.
 func (b *Backend) Run(ctx context.Context) error {
 	ln, err := b.listener.Listen(b.socketPath)
 	if err != nil {
@@ -66,14 +68,14 @@ func (b *Backend) Run(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			return nil
+			return ctx.Err()
 		default:
 		}
 
 		conn, err := ln.Accept()
 		if err != nil {
 			if ctx.Err() != nil {
-				return nil
+				return ctx.Err()
 			}
 			return fmt.Errorf("accept: %w", err)
 		}

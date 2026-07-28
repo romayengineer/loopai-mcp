@@ -3,11 +3,44 @@ package backend
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 
 	"github.com/romayengineer/loopai-mcp/internal/proto"
 )
+
+// mockPromptRenderer implements PromptRenderer for testing.
+type mockPromptRenderer struct {
+	mu       sync.Mutex
+	names    []string  // records which templates were requested
+	received []PromptVars // records the vars passed to each Render call
+}
+
+func (m *mockPromptRenderer) Render(name string, vars PromptVars) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.names = append(m.names, name)
+	m.received = append(m.received, vars)
+	return "rendered:" + name
+}
+
+func (m *mockPromptRenderer) Names() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	result := make([]string, len(m.names))
+	copy(result, m.names)
+	return result
+}
+
+func (m *mockPromptRenderer) LastVars() PromptVars {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.received) == 0 {
+		return PromptVars{}
+	}
+	return m.received[len(m.received)-1]
+}
 
 type mockAnalyzer struct {
 	result GateResult
@@ -121,6 +154,67 @@ func TestGateHandleIdle(t *testing.T) {
 				t.Fatalf("expected MsgType, got %s", conn.messages[0].Type)
 			}
 		})
+	}
+}
+
+// TestGateWithMockPromptRenderer verifies that Gate uses the PromptRenderer
+// interface correctly — it calls Render with the right template name and
+// passes extracted error lines (not the full output buffer) as Errors.
+func TestGateWithMockPromptRenderer(t *testing.T) {
+	renderer := &mockPromptRenderer{}
+	analyzer := &mockAnalyzer{
+		result: GateResult{Phase: PhaseCompile, Result: ResultFailure},
+	}
+	gate := NewGate(analyzer, renderer)
+	var conn mockLauncherConn
+
+	gate.handleIdle(context.Background(), &conn)
+
+	names := renderer.Names()
+	if len(names) != 1 || names[0] != "compile-fail" {
+		t.Fatalf("expected prompt 'compile-fail', got %v", names)
+	}
+}
+
+// TestGateWithRealPromptLoader verifies Gate still works with the
+// concrete PromptLoader (implements PromptRenderer via the interface).
+func TestGateWithRealPromptLoader(t *testing.T) {
+	gate := NewGate(&mockAnalyzer{
+		result: GateResult{Phase: PhaseTest, Result: ResultSuccess},
+	}, NewPromptLoader("."))
+	var conn mockLauncherConn
+
+	gate.handleIdle(context.Background(), &conn)
+	if len(conn.messages) != 1 || conn.messages[0].Type != proto.MsgType {
+		t.Fatalf("expected 1 MsgType message, got %d", len(conn.messages))
+	}
+}
+
+// TestGateErrorsFieldIsExtracted verifies that the Errors field passed to
+// the prompt renderer contains only extracted error lines, not the full
+// output buffer.
+func TestGateErrorsFieldIsExtracted(t *testing.T) {
+	renderer := &mockPromptRenderer{}
+	buf := NewOutputBuffer()
+	gate := NewGate(buf, renderer)
+
+	gate.handleOutput([]byte("> go build ./...\n"))
+	gate.handleOutput([]byte("./main.go:23:2: undefined: Foo\n"))
+	gate.handleOutput([]byte("some informational log line\n"))
+	gate.handleIdle(context.Background(), &mockLauncherConn{})
+
+	vars := renderer.LastVars()
+	if vars.Phase != "compile" || vars.Result != "failure" {
+		t.Fatalf("expected compile/failure, got %s/%s", vars.Phase, vars.Result)
+	}
+	if len(vars.Errors) == 0 {
+		t.Fatal("expected non-empty Errors")
+	}
+	if strings.Contains(vars.Errors, "informational") {
+		t.Fatalf("Errors should not contain non-error lines, got: %q", vars.Errors)
+	}
+	if !strings.Contains(vars.Errors, "main.go:23") {
+		t.Fatalf("Errors should contain error lines, got: %q", vars.Errors)
 	}
 }
 

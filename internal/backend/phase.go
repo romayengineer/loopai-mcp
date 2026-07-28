@@ -1,6 +1,11 @@
 package backend
 
-import "regexp"
+import (
+	"regexp"
+	"strings"
+)
+
+const defaultMaxErrorBytes = 100 * 1024
 
 // Phase identifies which enforcement gate the model is currently in.
 type Phase int
@@ -130,4 +135,55 @@ func analyzeOutput(output string, p Phase) PhaseResult {
 		return ResultSuccess
 	}
 	return ResultUnknown
+}
+
+// extractErrorLines returns only the lines from output that match the
+// failure patterns for the given phase. This is used to populate the
+// Errors template variable with relevant error lines instead of passing
+// the entire multi-megabyte output buffer to the prompt template.
+//
+// For unknown phases or phases with no failure patterns, returns the
+// full output unchanged (with trailing whitespace trimmed).
+func extractErrorLines(output string, p Phase) string {
+	// Trim trailing whitespace before splitting to avoid empty trailing
+	// elements from strings.Split.
+	output = strings.TrimRight(output, "\n\r\t ")
+
+	patterns := gatePatterns(p)
+	if len(patterns) == 0 {
+		return output
+	}
+
+	var errorPatterns []*regexp.Regexp
+	for _, pm := range patterns {
+		if pm.Result == ResultFailure {
+			errorPatterns = append(errorPatterns, pm.Trigger)
+		}
+	}
+	if len(errorPatterns) == 0 {
+		return output
+	}
+
+	lines := strings.Split(output, "\n")
+	var matched []string
+	for _, line := range lines {
+		for _, re := range errorPatterns {
+			if re.MatchString(line) {
+				matched = append(matched, line)
+				break
+			}
+		}
+	}
+	return strings.Join(matched, "\n")
+}
+
+// extractErrorLinesMax is like extractErrorLines but caps the total
+// output to maxBytes to prevent unbounded memory when the error output
+// itself is very large (e.g. thousands of compiler errors).
+func extractErrorLinesMax(output string, p Phase, maxBytes int) string {
+	result := extractErrorLines(output, p)
+	if len(result) > maxBytes {
+		return result[:maxBytes]
+	}
+	return result
 }

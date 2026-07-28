@@ -129,3 +129,60 @@ func TestIdleDetectorStartRace(t *testing.T) {
 	wg.Wait()
 	// Test passes if no panic from concurrent Start/Stop races
 }
+
+// TestIdleDetectorFireStopRace simulates the scenario where the timer fires
+// concurrently with Stop(). The callback must be resilient to this race.
+func TestIdleDetectorFireStopRace(t *testing.T) {
+	var (
+		mu           sync.Mutex
+		callCount    int
+		afterStop    int // count of calls after Stop() was requested
+		stopped      bool
+	)
+	detector := NewIdleDetector(1*time.Millisecond, func() {
+		mu.Lock()
+		callCount++
+		if stopped {
+			afterStop++
+		}
+		mu.Unlock()
+	})
+
+	detector.Start()
+	time.Sleep(5 * time.Millisecond) // let it fire at least once
+	mu.Lock()
+	stopped = true
+	mu.Unlock()
+	detector.Stop()
+	time.Sleep(10 * time.Millisecond)
+
+	mu.Lock()
+	calls := callCount
+	after := afterStop
+	mu.Unlock()
+
+	// At minimum, the detector should have fired at least once.
+	if calls == 0 {
+		t.Fatal("expected at least one fire")
+	}
+	// It's acceptable for fire() to call the callback after Stop() in rare
+	// race conditions (time.AfterFunc has inherent race between fire and Stop).
+	// The callback MUST handle this gracefully. We just verify no panic.
+	_ = after
+	t.Logf("fires: %d, after-stop: %d", calls, after)
+}
+
+// TestIdleDetectorCallbackCallsReset verifies that calling Reset() from
+// within the idle callback does not deadlock (since fire() releases the
+// mutex before calling the callback).
+func TestIdleDetectorCallbackCallsReset(t *testing.T) {
+	var d IdleTimer
+	d = NewIdleDetector(10*time.Millisecond, func() {
+		// Reset may be called from within the callback
+		d.Reset()
+	})
+	d.Start()
+	time.Sleep(100 * time.Millisecond)
+	d.Stop()
+	// Test passes if no deadlock
+}

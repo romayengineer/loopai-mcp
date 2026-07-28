@@ -103,8 +103,14 @@ func NewConn(conn net.Conn) *Conn {
 }
 
 // Send encodes and writes a Message to the connection. If ctx carries
-// a deadline, the write deadline is set accordingly.
+// a deadline, the write deadline is set accordingly. Returns ctx.Err()
+// if the context is already cancelled before attempting the write.
 func (c *Conn) Send(ctx context.Context, msg Message) error {
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("send %s: %w", msg.Type, ctx.Err())
+	default:
+	}
 	if deadline, ok := ctx.Deadline(); ok {
 		if err := c.conn.SetWriteDeadline(deadline); err != nil {
 			return fmt.Errorf("set write deadline: %w", err)
@@ -119,7 +125,14 @@ func (c *Conn) Send(ctx context.Context, msg Message) error {
 
 // Receive reads a newline-delimited JSON Message from the connection.
 // If ctx carries a deadline, the read deadline is set accordingly.
+// Returns ctx.Err() if the context is already cancelled before attempting
+// the read.
 func (c *Conn) Receive(ctx context.Context) (Message, error) {
+	select {
+	case <-ctx.Done():
+		return Message{}, fmt.Errorf("receive: %w", ctx.Err())
+	default:
+	}
 	if deadline, ok := ctx.Deadline(); ok {
 		if err := c.conn.SetReadDeadline(deadline); err != nil {
 			return Message{}, fmt.Errorf("set read deadline: %w", err)
