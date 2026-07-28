@@ -108,6 +108,13 @@ func TestIdleDetectorFireAfterStop(t *testing.T) {
 	}
 }
 
+func TestIdleDetectorStartTwice(t *testing.T) {
+	d := NewIdleDetector(1*time.Second, func() {})
+	d.Start()
+	d.Start() // second call should be a no-op (CAS fails)
+	d.Stop()
+}
+
 func TestIdleDetectorStartRace(t *testing.T) {
 	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {

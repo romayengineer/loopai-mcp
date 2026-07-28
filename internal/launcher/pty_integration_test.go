@@ -299,6 +299,21 @@ func TestPtyProcessSignalRunning(t *testing.T) {
 	}
 }
 
+func TestPtyProcessSignalExited(t *testing.T) {
+	// Signal on an already-exited process should return an error.
+	proc, err := Spawn("echo", []string{"quick"})
+	if err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+	io.Copy(io.Discard, proc)
+	<-proc.Wait()
+
+	err = proc.Signal(os.Interrupt)
+	if err == nil {
+		t.Fatal("expected error signaling exited process, got nil")
+	}
+}
+
 // PtyProcessFromSpawn is a helper that spawns a process and returns the underlying *PtyProcess.
 func PtyProcessFromSpawn(client string, args []string) (*PtyProcess, error) {
 	proc, err := Spawn(client, args)

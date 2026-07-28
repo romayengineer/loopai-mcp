@@ -51,12 +51,12 @@ test:
 	go test -tags=integration ./internal/... -count=1 -timeout 30s
 
 cover:
-	@go test -coverprofile=/tmp/loopai-cover.out ./internal/... ./cmd/loopai ./cmd/loopai-capture -count=1 -timeout 30s > /dev/null 2>&1
-	@go test -coverprofile=/tmp/loopai-cover-integration.out -coverpkg=./internal/...,./cmd/... -tags=integration ./internal/... ./cmd/... -count=1 -timeout 120s > /dev/null 2>&1
-	@echo "=== Unit test coverage ==="
-	@go tool cover -func=/tmp/loopai-cover.out | grep total | awk '{print $$3}'
-	@echo "=== Combined (unit + integration) coverage ==="
-	@go tool cover -func=/tmp/loopai-cover-integration.out | grep total | awk '{print $$3}'
+	@go test -coverprofile=/tmp/loopai-cover-unit.out ./internal/... -count=1 -timeout 30s > /dev/null 2>&1
+	@go test -coverprofile=/tmp/loopai-cover-all.out -coverpkg=./internal/... -tags=integration ./internal/... -count=1 -timeout 60s > /dev/null 2>&1
+	@echo "=== Internal unit test coverage ==="
+	@go tool cover -func=/tmp/loopai-cover-unit.out | grep total | awk '{print $$3}'
+	@echo "=== Internal combined (unit + integration) ==="
+	@go tool cover -func=/tmp/loopai-cover-all.out | grep total | awk '{print $$3}'
 
 install-hooks:
 	git config core.hooksPath .githooks

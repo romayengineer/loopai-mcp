@@ -82,6 +82,23 @@ func (l *immediateListener) Addr() net.Addr {
 	return nil
 }
 
+type closeErrorListener struct {
+	net.Listener
+}
+
+func (l *closeErrorListener) Close() error {
+	return errors.New("close failed")
+}
+
+func TestBackendStopCloseError(t *testing.T) {
+	// Store a listener in ln that returns an error on Close.
+	// Stop() should log and handle it gracefully.
+	b := New("/tmp/nonexistent/test_stop_close_error.sock", func(_ context.Context, _ LauncherConn) {})
+	b.ln.Store(&closeErrorListener{})
+	b.Stop()
+	// Should not panic
+}
+
 func TestBackendRunAcceptError(t *testing.T) {
 	b := New("/tmp/nonexistent/test_run_accept_error.sock", func(_ context.Context, _ LauncherConn) {})
 	b.listener = socketListenFunc(func(_ string) (net.Listener, error) {

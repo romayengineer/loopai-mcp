@@ -2,6 +2,7 @@ package backend
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 
@@ -34,6 +35,25 @@ func (c *mockLauncherConn) Receive(_ context.Context) (proto.Message, error) {
 
 func (c *mockLauncherConn) Close() error {
 	return nil
+}
+
+type mockLauncherConnSendError struct {
+	mockLauncherConn
+}
+
+func (c *mockLauncherConnSendError) Send(_ context.Context, _ proto.Message) error {
+	return errors.New("send failed")
+}
+
+func TestGateHandleIdleSendError(t *testing.T) {
+	// handleIdle's send() closure should log and continue on Send error.
+	gate := NewGate(&mockAnalyzer{
+		result: GateResult{Phase: PhaseCompile, Result: ResultSuccess},
+	})
+	var conn mockLauncherConnSendError
+
+	gate.handleIdle(context.Background(), &conn)
+	// Test passes if no panic from the send failure
 }
 
 func TestGateHandleIdle(t *testing.T) {

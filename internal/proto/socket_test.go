@@ -87,6 +87,17 @@ func TestReceiveConnectionClosed(t *testing.T) {
 	}
 }
 
+func TestReceiveSetReadDeadlineError(t *testing.T) {
+	cc := NewConn(&deadlineErrorConn{})
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Second))
+	defer cancel()
+
+	_, err := cc.Receive(ctx)
+	if err == nil {
+		t.Fatal("expected error from SetReadDeadline failure")
+	}
+}
+
 func TestSendSetWriteDeadlineError(t *testing.T) {
 	cc := NewConn(&deadlineErrorConn{})
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Second))
