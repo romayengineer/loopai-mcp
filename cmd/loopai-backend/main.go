@@ -15,9 +15,23 @@ import (
 
 func main() {
 	socketPath := flag.String("socket", proto.DefaultSocketPath(), "unix socket path")
+	logLevel := flag.String("log-level", "info", "log level (debug, info, warn, error)")
 	flag.Parse()
 
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
+	var level slog.Level
+	switch *logLevel {
+	case "debug":
+		level = slog.LevelDebug
+	case "info":
+		level = slog.LevelInfo
+	case "warn":
+		level = slog.LevelWarn
+	case "error":
+		level = slog.LevelError
+	default:
+		level = slog.LevelInfo
+	}
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})))
 
 	if flag.NArg() > 0 && flag.Arg(0) == "stop" {
 		if err := stopBackend(*socketPath); err != nil {
