@@ -84,6 +84,12 @@ func TestDetectPhaseTriggerGoModVerify(t *testing.T) {
 	}
 }
 
+func TestDetectPhaseTriggerGoGenerate(t *testing.T) {
+	if p := detectPhaseTrigger("> go generate ./...\n"); p != PhaseCompile {
+		t.Fatalf("expected PhaseCompile for go generate, got %s", p)
+	}
+}
+
 func TestDetectPhaseTriggerGolangciLint(t *testing.T) {
 	if p := detectPhaseTrigger("> golangci-lint run ./...\n"); p != PhaseLint {
 		t.Fatalf("expected PhaseLint, got %s", p)

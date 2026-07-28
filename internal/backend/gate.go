@@ -23,18 +23,22 @@ type Gate struct {
 	prompts        PromptRenderer
 	lastIdlePrompt time.Time
 	lastSend       map[string]time.Time // per-prompt-name cooldown
+	attempts       map[Phase]int        // per-phase attempt counter (for detecting loops)
+	promptCooldown time.Duration        // min interval between same prompt; 0 = default
 }
 
-// promptCooldown is the minimum interval between sending the same prompt
-// name. Prevents rapid-fire prompt injection when idle fires frequently.
-const promptCooldown = 5 * time.Second
+// defaultPromptCooldown is the minimum interval between sending the same
+// prompt name. Prevents rapid-fire prompt injection when idle fires frequently.
+const defaultPromptCooldown = 5 * time.Second
 
 // NewGate creates a Gate with the given output analyzer and prompt renderer.
 func NewGate(analyzer OutputAnalyzer, prompts PromptRenderer) *Gate {
 	return &Gate{
-		output:   analyzer,
-		prompts:  prompts,
-		lastSend: make(map[string]time.Time),
+		output:         analyzer,
+		prompts:        prompts,
+		lastSend:       make(map[string]time.Time),
+		attempts:       make(map[Phase]int),
+		promptCooldown: defaultPromptCooldown,
 	}
 }
 
@@ -49,17 +53,28 @@ func (g *Gate) handleIdle(ctx context.Context, conn LauncherConn) {
 	rawOutput := g.output.String()
 	g.output.Reset()
 
+	// Track phase attempts. Increment when a phase produces a failure result,
+	// so the prompt template can detect when the model is stuck in a loop.
+	if phase != PhaseUnknown && res == ResultFailure {
+		g.attempts[phase]++
+	} else if phase == PhaseUnknown && len(rawOutput) > 0 {
+		// Count unknown-phase idle events as context for the "idle" prompt.
+		g.attempts[PhaseUnknown]++
+	}
+
 	// Extract only the error lines from the output instead of passing the
 	// entire (potentially multi-megabyte) buffer. This keeps prompt template
 	// rendering fast and avoids sending huge amounts of text to the client.
 	errLines := extractErrorLinesMax(rawOutput, phase, defaultMaxErrorBytes)
 
 	vars := PromptVars{
-		Phase:   phase.String(),
-		Result:  res.String(),
-		BufSize: len(rawOutput),
-		Output:  rawOutput,
-		Errors:  errLines,
+		Phase:         phase.String(),
+		Result:        res.String(),
+		BufSize:       len(rawOutput),
+		Output:        rawOutput,
+		Errors:        errLines,
+		PhaseAttempts: g.attempts[phase],
+		TotalAttempts: g.attempts[PhaseCompile] + g.attempts[PhaseLint] + g.attempts[PhaseTest],
 	}
 
 	slog.Debug("idle analysis",
@@ -67,12 +82,14 @@ func (g *Gate) handleIdle(ctx context.Context, conn LauncherConn) {
 		"result", vars.Result,
 		"buf_size", vars.BufSize,
 		"errors_size", len(errLines),
+		"phase_attempts", vars.PhaseAttempts,
+		"total_attempts", vars.TotalAttempts,
 	)
 
 	send := func(name string) {
 		// Per-prompt cooldown: skip if we sent the same prompt recently.
 		// Prevents rapid-fire prompt injection when idle fires frequently.
-		if last, ok := g.lastSend[name]; ok && time.Since(last) < promptCooldown {
+		if last, ok := g.lastSend[name]; ok && time.Since(last) < g.promptCooldown {
 			slog.Debug("prompt suppressed by cooldown", "name", name, "since", time.Since(last))
 			return
 		}

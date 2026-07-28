@@ -18,6 +18,13 @@ type PromptVars struct {
 	Errors   string // error lines extracted from output (for failure prompts)
 	Output   string // full output since last idle (for idle prompt)
 	BuildOut string // output produced during the build/lint/test step
+
+	// PhaseAttempts is how many times this specific phase has failed
+	// consecutively. Useful for detecting when the model is stuck.
+	PhaseAttempts int
+	// TotalAttempts is the sum of compile + lint + test failures across
+	// the entire session. Useful for context-aware prompts.
+	TotalAttempts int
 }
 
 // PromptLoader reads prompt templates from a directory. Each template is
@@ -59,6 +66,8 @@ func (p *PromptLoader) Render(name string, vars PromptVars) string {
 		result = strings.ReplaceAll(result, "{{.Errors}}", vars.Errors)
 		result = strings.ReplaceAll(result, "{{.Output}}", vars.Output)
 		result = strings.ReplaceAll(result, "{{.BuildOut}}", vars.BuildOut)
+		result = strings.ReplaceAll(result, "{{.PhaseAttempts}}", fmt.Sprintf("%d", vars.PhaseAttempts))
+		result = strings.ReplaceAll(result, "{{.TotalAttempts}}", fmt.Sprintf("%d", vars.TotalAttempts))
 		return result
 	}
 	return strings.TrimRight(buf.String(), "\n\r\t ")

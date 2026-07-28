@@ -25,8 +25,9 @@ const (
 	// DefaultCols is the default PTY width in columns.
 	DefaultCols uint16 = 120
 	// TermEnv is the TERM environment variable value for the spawned client.
-	TermEnv         = "TERM=xterm-256color"
-	ptyCloseTimeout = 5 * time.Second
+	TermEnv          = "TERM=xterm-256color"
+	ptyCloseTimeout  = 5 * time.Second
+	gracefulKillWait = 3 * time.Second
 )
 
 // Process is the interface for a PTY-based child process. It decouples
@@ -207,18 +208,49 @@ func (p *PtyProcess) PID() int {
 	return -1
 }
 
-// Close closes the PTY file descriptor and kills the process if running.
+// Close closes the PTY file descriptor and terminates the child process.
+// It tries SIGTERM first for a graceful shutdown, then escalates to SIGKILL
+// after gracefulKillWait if the process hasn't exited. This minimizes the
+// risk of orphaned or misbehaving child processes.
 func (p *PtyProcess) Close() error {
 	closeErr := p.PTY.Close()
 
-	// Only kill if the process hasn't already exited.
+	// Check if the process has already exited.
 	select {
 	case <-p.done:
+		// Already exited — nothing more to do.
+		if closeErr != nil {
+			return fmt.Errorf("close PTY: %w", closeErr)
+		}
+		return nil
 	default:
-		if p.Cmd.Process != nil {
-			if err := p.Cmd.Process.Kill(); err != nil && closeErr == nil {
-				closeErr = fmt.Errorf("kill: %w", err)
+	}
+
+	// Process is still running. Try graceful SIGTERM first.
+	if p.Cmd.Process != nil {
+		slog.Debug("sending SIGTERM to process", "pid", p.PID())
+		if err := p.Cmd.Process.Signal(syscall.SIGTERM); err != nil {
+			slog.Warn("signal SIGTERM", "pid", p.PID(), "error", err)
+			// If SIGTERM fails, fall through to SIGKILL.
+		} else {
+			// Wait briefly for graceful shutdown.
+			select {
+			case <-p.done:
+				slog.Debug("process exited after SIGTERM", "pid", p.PID())
+				if closeErr != nil {
+					return fmt.Errorf("close PTY: %w", closeErr)
+				}
+				return nil
+			case <-time.After(gracefulKillWait):
+				slog.Debug("process did not exit after SIGTERM, sending SIGKILL", "pid", p.PID())
 			}
+		}
+	}
+
+	// Escalate to SIGKILL.
+	if p.Cmd.Process != nil {
+		if err := p.Cmd.Process.Kill(); err != nil && closeErr == nil {
+			closeErr = fmt.Errorf("kill: %w", err)
 		}
 	}
 

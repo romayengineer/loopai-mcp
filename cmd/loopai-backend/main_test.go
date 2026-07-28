@@ -70,6 +70,37 @@ func TestValidatePromptsDirWithFiles(t *testing.T) {
 	}
 }
 
+func TestValidatePromptsDirInvalidTemplate(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create a template with invalid Go template syntax (unclosed action)
+	path := filepath.Join(tmpDir, "compile-fail.md")
+	if err := os.WriteFile(path, []byte("{{.Phase}"), 0644); err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+
+	err := validatePromptsDir(tmpDir)
+	if err == nil {
+		t.Fatal("expected error for invalid template, got nil")
+	}
+}
+
+func TestValidatePromptsDirValidTemplate(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Template with valid Go template syntax using documented variables
+	path := filepath.Join(tmpDir, "compile-fail.md")
+	content := `Fix the error: {{.Errors}}`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+
+	err := validatePromptsDir(tmpDir)
+	if err != nil {
+		t.Fatalf("expected no error for valid template, got: %v", err)
+	}
+}
+
 // Integration tests
 func socketPath(t *testing.T, name string) string {
 	t.Helper()

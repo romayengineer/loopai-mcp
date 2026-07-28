@@ -363,3 +363,65 @@ func TestHandleLauncherMalformedStartedContinues(t *testing.T) {
 		t.Errorf("expected to process both messages, processed %d", conn.index)
 	}
 }
+
+func TestGatePhaseAttemptsTracking(t *testing.T) {
+	renderer := &mockPromptRenderer{}
+	buf := NewOutputBuffer()
+	gate := NewGate(buf, renderer)
+
+	// First compile failure
+	gate.handleOutput([]byte("> go build ./...\n"))
+	gate.handleOutput([]byte("./main.go:5:2: undefined: Foo\n"))
+	gate.handleIdle(context.Background(), &mockLauncherConn{})
+
+	vars := renderer.LastVars()
+	if vars.PhaseAttempts != 1 {
+		t.Fatalf("expected 1 compile attempt, got %d", vars.PhaseAttempts)
+	}
+	if vars.TotalAttempts != 1 {
+		t.Fatalf("expected 1 total attempt, got %d", vars.TotalAttempts)
+	}
+
+	// Second compile failure (same phase) — need to bypass cooldown
+	gate.promptCooldown = 0 // disable cooldown for testing
+	buf.Write([]byte("> go build ./...\n"))
+	buf.Write([]byte("./main.go:10:2: undefined: Bar\n"))
+	gate.handleIdle(context.Background(), &mockLauncherConn{})
+
+	vars2 := renderer.LastVars()
+	if vars2.PhaseAttempts != 2 {
+		t.Fatalf("expected 2 compile attempts, got %d", vars2.PhaseAttempts)
+	}
+	if vars2.TotalAttempts != 2 {
+		t.Fatalf("expected 2 total attempts, got %d", vars2.TotalAttempts)
+	}
+	gate.promptCooldown = defaultPromptCooldown // restore
+}
+
+func TestGatePhaseAttemptsResetOnNewPhase(t *testing.T) {
+	renderer := &mockPromptRenderer{}
+	buf := NewOutputBuffer()
+	gate := NewGate(buf, renderer)
+
+	// Compile fails once
+	gate.handleOutput([]byte("> go build ./...\n"))
+	gate.handleOutput([]byte("./main.go:5:2: undefined: Foo\n"))
+	gate.handleIdle(context.Background(), &mockLauncherConn{})
+
+	// Lint fails once — phase-specific counter resets for the new phase
+	buf.Write([]byte("> golangci-lint run ./...\n"))
+	buf.Write([]byte("main.go:5:2: unused: x\n"))
+	gate.handleIdle(context.Background(), &mockLauncherConn{})
+
+	vars := renderer.LastVars()
+	if vars.Phase != "lint" || vars.Result != "failure" {
+		t.Fatalf("expected lint/failure, got %s/%s", vars.Phase, vars.Result)
+	}
+	if vars.PhaseAttempts != 1 {
+		t.Fatalf("expected 1 lint attempt, got %d", vars.PhaseAttempts)
+	}
+	// Total attempts accumulates across all phases
+	if vars.TotalAttempts != 2 {
+		t.Fatalf("expected 2 total attempts (1 compile + 1 lint), got %d", vars.TotalAttempts)
+	}
+}

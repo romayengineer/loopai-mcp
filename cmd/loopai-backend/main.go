@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"text/template"
 
 	"github.com/romayengineer/loopai-mcp/internal/backend"
 	"github.com/romayengineer/loopai-mcp/internal/proto"
@@ -20,20 +21,7 @@ func main() {
 	logLevel := flag.String("log-level", "info", "log level (debug, info, warn, error)")
 	flag.Parse()
 
-	var level slog.Level
-	switch *logLevel {
-	case "debug":
-		level = slog.LevelDebug
-	case "info":
-		level = slog.LevelInfo
-	case "warn":
-		level = slog.LevelWarn
-	case "error":
-		level = slog.LevelError
-	default:
-		level = slog.LevelInfo
-	}
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})))
+	proto.SetLogDefault(proto.ParseLogLevel(*logLevel))
 
 	if flag.NArg() > 0 && flag.Arg(0) == "stop" {
 		if err := stopBackend(*socketPath); err != nil {
@@ -76,7 +64,17 @@ func main() {
 	}
 }
 
-// validatePromptsDir checks that the prompts directory exists and is readable.
+// expectedTemplates lists the prompt template files required for operation.
+// Each is validated at startup to catch template syntax errors early.
+var expectedTemplates = []string{
+	"compile-fail.md", "compile-pass.md",
+	"lint-fail.md", "lint-pass.md",
+	"test-fail.md", "test-pass.md",
+	"idle.md",
+}
+
+// validatePromptsDir checks that the prompts directory exists, is readable,
+// and that all expected template files are parseable Go templates.
 // This prevents startup failures when enforcing phases.
 func validatePromptsDir(dir string) error {
 	info, err := os.Stat(dir)
@@ -91,11 +89,34 @@ func validatePromptsDir(dir string) error {
 		return fmt.Errorf("prompts path is not a directory: %s", dir)
 	}
 
-	// Try to read directory to verify permissions
-	if _, err := os.ReadDir(dir); err != nil {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
 		return fmt.Errorf("cannot read prompts directory: %w", err)
 	}
 
-	slog.Debug("prompts directory validated", "path", dir)
+	// Build a set of existing files for existence check
+	existing := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		existing[e.Name()] = true
+	}
+
+	// Validate each expected template exists and is a valid Go template.
+	for _, name := range expectedTemplates {
+		if !existing[name] {
+			slog.Warn("expected prompt template not found", "name", name, "path", dir)
+			continue // non-fatal — the PromptLoader will return a fallback
+		}
+		path := filepath.Join(dir, name)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			slog.Warn("cannot read prompt template", "name", name, "error", err)
+			continue
+		}
+		if _, err := template.New(name).Option("missingkey=error").Parse(string(data)); err != nil {
+			return fmt.Errorf("invalid template %s: %w", path, err)
+		}
+	}
+
+	slog.Debug("prompts directory validated", "path", dir, "templates", len(expectedTemplates))
 	return nil
 }
