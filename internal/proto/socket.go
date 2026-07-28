@@ -7,6 +7,14 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"time"
+)
+
+const (
+	SocketFileName  = "loopai.sock"
+	SocketDirMode   os.FileMode = 0700
+	SocketFileMode  os.FileMode = 0600
+	socketDialTimeout           = 5 * time.Second
 )
 
 func DefaultSocketPath() string {
@@ -19,26 +27,33 @@ func DefaultSocketPath() string {
 			dir = "/tmp"
 		}
 	}
-	os.MkdirAll(dir, 0700)
-	return filepath.Join(dir, "loopai.sock")
+	if err := os.MkdirAll(dir, SocketDirMode); err != nil {
+		return filepath.Join(dir, SocketFileName)
+	}
+	return filepath.Join(dir, SocketFileName)
 }
 
 func Listen(socketPath string) (net.Listener, error) {
-	os.Remove(socketPath)
+	if err := os.Remove(socketPath); err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("remove stale socket: %w", err)
+	}
 	parent := filepath.Dir(socketPath)
-	if err := os.MkdirAll(parent, 0700); err != nil {
+	if err := os.MkdirAll(parent, SocketDirMode); err != nil {
 		return nil, fmt.Errorf("create socket dir: %w", err)
 	}
 	ln, err := net.Listen("unix", socketPath)
 	if err != nil {
 		return nil, fmt.Errorf("listen on %s: %w", socketPath, err)
 	}
-	os.Chmod(socketPath, 0600)
+	if err := os.Chmod(socketPath, SocketFileMode); err != nil {
+		ln.Close()
+		return nil, fmt.Errorf("chmod socket: %w", err)
+	}
 	return ln, nil
 }
 
 func Connect(socketPath string) (net.Conn, error) {
-	conn, err := net.Dial("unix", socketPath)
+	conn, err := net.DialTimeout("unix", socketPath, socketDialTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("connect to %s: %w", socketPath, err)
 	}

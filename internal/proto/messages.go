@@ -1,3 +1,6 @@
+// Package proto defines shared message types and wire protocol for
+// communication between the launcher and backend over a Unix socket.
+// Messages are newline-delimited JSON.
 package proto
 
 import "encoding/json"
@@ -10,7 +13,7 @@ const (
 	MsgExited   MessageType = "exited"
 	MsgStarted  MessageType = "started"
 	MsgType     MessageType = "type"
-	MsgCtrlC   MessageType = "ctrl_c"
+	MsgCtrlC    MessageType = "ctrl_c"
 	MsgShutdown MessageType = "shutdown"
 )
 

@@ -1,3 +1,6 @@
+// Package launcher provides PTY lifecycle and I/O streaming for spawning
+// TUI agent clients (Claude Code, OpenCode, etc.) in a pseudo-terminal and
+// piping their output to a backend over a Unix socket.
 package launcher
 
 import (
@@ -5,17 +8,26 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
+	"time"
 
 	"github.com/creack/pty"
+)
+
+const (
+	DefaultRows  uint16 = 40
+	DefaultCols  uint16 = 120
+	TermEnv             = "TERM=xterm-256color"
+	ptyCloseTimeout      = 5 * time.Second
 )
 
 type PtyProcess struct {
 	PTY      *os.File
 	Cmd      *exec.Cmd
 	done     chan struct{}
-	exitCode int
-	exitErr  error
+	exitCode atomic.Int64
+	exitErr  atomic.Value // stores error
 }
 
 func Spawn(client string, args []string) (*PtyProcess, error) {
@@ -25,51 +37,59 @@ func Spawn(client string, args []string) (*PtyProcess, error) {
 	}
 
 	cmd := exec.Command(binary, args...)
-	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
+	cmd.Env = append(os.Environ(), TermEnv)
 
-	ptym, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: 40, Cols: 120})
+	ptym, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: DefaultRows, Cols: DefaultCols})
 	if err != nil {
 		return nil, fmt.Errorf("start PTY: %w", err)
 	}
 
 	p := &PtyProcess{
-		PTY:      ptym,
-		Cmd:      cmd,
-		done:     make(chan struct{}),
-		exitCode: -1,
+		PTY:  ptym,
+		Cmd:  cmd,
+		done: make(chan struct{}),
 	}
+	p.exitCode.Store(-1)
 
 	go func() {
-		p.exitErr = cmd.Wait()
+		waitErr := cmd.Wait()
+		if waitErr != nil {
+			p.exitErr.Store(waitErr)
+		}
 		if cmd.ProcessState != nil {
 			state := cmd.ProcessState
 			if status, ok := state.Sys().(syscall.WaitStatus); ok {
 				if status.Exited() {
-					p.exitCode = status.ExitStatus()
+					p.exitCode.Store(int64(status.ExitStatus()))
 				} else if status.Signaled() {
-					p.exitCode = -int(status.Signal())
+					p.exitCode.Store(int64(-int(status.Signal())))
 				} else {
-					p.exitCode = state.ExitCode()
+					p.exitCode.Store(int64(state.ExitCode()))
 				}
 			} else {
-				p.exitCode = state.ExitCode()
+				p.exitCode.Store(int64(state.ExitCode()))
 			}
 		}
 		close(p.done)
 	}()
 
-	go func() {
-		sigCh := make(chan os.Signal, 1)
-		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
-		select {
-		case sig := <-sigCh:
-			cmd.Process.Signal(sig)
-		case <-p.done:
-			signal.Stop(sigCh)
-		}
-	}()
+	go forwardSignals(cmd, p.done)
 
 	return p, nil
+}
+
+func forwardSignals(cmd *exec.Cmd, done <-chan struct{}) {
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	defer signal.Stop(sigCh)
+
+	select {
+	case sig := <-sigCh:
+		if cmd.Process != nil {
+			cmd.Process.Signal(sig)
+		}
+	case <-done:
+	}
 }
 
 func (p *PtyProcess) Resize(rows, cols uint16) error {
@@ -93,14 +113,27 @@ func (p *PtyProcess) Wait() <-chan struct{} {
 }
 
 func (p *PtyProcess) ExitCode() int {
-	return p.exitCode
+	return int(p.exitCode.Load())
 }
 
 func (p *PtyProcess) Close() error {
-	p.PTY.Close()
-	if p.Cmd.Process != nil {
-		p.Cmd.Process.Kill()
+	closeErr := p.PTY.Close()
+
+	// Only kill if the process hasn't already exited.
+	select {
+	case <-p.done:
+	default:
+		if p.Cmd.Process != nil {
+			if err := p.Cmd.Process.Kill(); err != nil && closeErr == nil {
+				closeErr = err
+			}
+		}
 	}
-	<-p.done
-	return p.exitErr
+
+	select {
+	case <-p.done:
+	case <-time.After(ptyCloseTimeout):
+	}
+
+	return closeErr
 }

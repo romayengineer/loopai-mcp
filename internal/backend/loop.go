@@ -8,6 +8,8 @@ import (
 	"github.com/romayengineer/loopai-mcp/internal/proto"
 )
 
+const defaultIdlePrompt = "list the directory contents"
+
 func HandleLauncher(pc *proto.Conn) {
 	defer pc.Close()
 
@@ -25,13 +27,18 @@ func HandleLauncher(pc *proto.Conn) {
 				log.Printf("bad output payload: %v", err)
 				continue
 			}
-			os.Stdout.Write(p.Data)
+			if _, err := os.Stdout.Write(p.Data); err != nil {
+				log.Printf("write output: %v", err)
+			}
 
 		case proto.MsgIdle:
 			log.Printf("[idle] client waiting for input")
-			pc.Send(proto.NewMessage(proto.MsgType, proto.TypePayload{
-				Text: "list the directory contents",
-			}))
+			if err := pc.Send(proto.NewMessage(proto.MsgType, proto.TypePayload{
+				Text: defaultIdlePrompt,
+			})); err != nil {
+				log.Printf("send idle prompt: %v", err)
+				return
+			}
 
 		case proto.MsgExited:
 			var p proto.ExitedPayload

@@ -5,7 +5,6 @@ package launcher
 import (
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -14,10 +13,34 @@ import (
 	"github.com/romayengineer/loopai-mcp/internal/proto"
 )
 
+const (
+	startupTimeout = 200 * time.Millisecond
+	settleTimeout  = 100 * time.Millisecond
+)
+
+func e2eSocketPath(t *testing.T, name string) string {
+	t.Helper()
+	path := "/tmp/loopai-e2e-" + name
+	os.Remove(path)
+	t.Cleanup(func() { os.Remove(path) })
+	return path
+}
+
+func startE2EBackend(t *testing.T, socketPath string, handler func(*proto.Conn)) *backend.Backend {
+	t.Helper()
+	b := backend.New(socketPath, handler)
+	go func() {
+		if err := b.Run(); err != nil {
+			t.Logf("backend exited: %v", err)
+		}
+	}()
+	t.Cleanup(func() { b.Stop() })
+	time.Sleep(startupTimeout)
+	return b
+}
+
 func TestEndToEndEcho(t *testing.T) {
-	socketPath := filepath.Join("/tmp", "loopai-e2e-echo.sock")
-	os.Remove(socketPath)
-	t.Cleanup(func() { os.Remove(socketPath) })
+	sp := e2eSocketPath(t, "echo.sock")
 
 	var (
 		gotOutput  bool
@@ -42,11 +65,11 @@ func TestEndToEndEcho(t *testing.T) {
 					outputData += string(p.Data)
 					gotOutput = true
 				}
-			case proto.MsgStarted:
-				var p proto.StartedPayload
-				json.Unmarshal(msg.Payload, &p)
 			case proto.MsgIdle:
-				pc.Send(proto.NewMessage(proto.MsgType, proto.TypePayload{Text: "done"}))
+				if err := pc.Send(proto.NewMessage(proto.MsgType, proto.TypePayload{Text: "done"})); err != nil {
+					mu.Unlock()
+					return
+				}
 			case proto.MsgExited:
 				var p proto.ExitedPayload
 				if err := json.Unmarshal(msg.Payload, &p); err == nil {
@@ -60,15 +83,9 @@ func TestEndToEndEcho(t *testing.T) {
 		}
 	}
 
-	b := backend.New(socketPath, handler)
-	go func() {
-		if err := b.Run(); err != nil {
-			t.Errorf("backend: %v", err)
-		}
-	}()
-	time.Sleep(200 * time.Millisecond)
+	startE2EBackend(t, sp, handler)
 
-	conn, err := proto.Connect(socketPath)
+	conn, err := proto.Connect(sp)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
@@ -79,15 +96,22 @@ func TestEndToEndEcho(t *testing.T) {
 	if err != nil {
 		t.Fatalf("spawn: %v", err)
 	}
-	defer proc.Close()
+	defer func() {
+		if err := proc.Close(); err != nil {
+			t.Errorf("close proc: %v", err)
+		}
+	}()
 
-	pc.Send(proto.NewMessage(proto.MsgStarted, proto.StartedPayload{
-		Pid:    proc.Cmd.Process.Pid,
-		Client: "echo",
-	}))
+	if err := pc.Send(proto.NewMessage(proto.MsgStarted, proto.StartedPayload{
+		Pid: proc.Cmd.Process.Pid, Client: "echo",
+	})); err != nil {
+		t.Fatalf("send started: %v", err)
+	}
 
 	idle := NewIdleDetector(2*time.Second, func() {
-		pc.Send(proto.NewMessage(proto.MsgIdle, proto.IdlePayload{}))
+		if err := pc.Send(proto.NewMessage(proto.MsgIdle, proto.IdlePayload{})); err != nil {
+			t.Logf("send idle: %v", err)
+		}
 	})
 	idle.Start()
 
@@ -100,9 +124,12 @@ func TestEndToEndEcho(t *testing.T) {
 
 	<-proc.Wait()
 	actualCode := proc.ExitCode()
-	pc.Send(proto.NewMessage(proto.MsgExited, proto.ExitedPayload{Code: actualCode}))
 
-	time.Sleep(100 * time.Millisecond)
+	if err := pc.Send(proto.NewMessage(proto.MsgExited, proto.ExitedPayload{Code: actualCode})); err != nil {
+		t.Logf("send exited: %v", err)
+	}
+
+	time.Sleep(settleTimeout)
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -125,9 +152,7 @@ func TestEndToEndEcho(t *testing.T) {
 }
 
 func TestEndToEndExitCode(t *testing.T) {
-	socketPath := filepath.Join("/tmp", "loopai-e2e-exit.sock")
-	os.Remove(socketPath)
-	t.Cleanup(func() { os.Remove(socketPath) })
+	sp := e2eSocketPath(t, "exit.sock")
 
 	var (
 		exitCode int = -99
@@ -144,8 +169,9 @@ func TestEndToEndExitCode(t *testing.T) {
 			mu.Lock()
 			if msg.Type == proto.MsgExited {
 				var p proto.ExitedPayload
-				json.Unmarshal(msg.Payload, &p)
-				exitCode = p.Code
+				if err := json.Unmarshal(msg.Payload, &p); err == nil {
+					exitCode = p.Code
+				}
 				mu.Unlock()
 				return
 			}
@@ -153,14 +179,13 @@ func TestEndToEndExitCode(t *testing.T) {
 		}
 	}
 
-	b := backend.New(socketPath, handler)
-	go b.Run()
-	time.Sleep(200 * time.Millisecond)
+	startE2EBackend(t, sp, handler)
 
-	conn, err := proto.Connect(socketPath)
+	conn, err := proto.Connect(sp)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
+	defer conn.Close()
 	pc := proto.NewConn(conn)
 
 	proc, err := Spawn("sh", []string{"-c", "exit 42"})
@@ -168,11 +193,12 @@ func TestEndToEndExitCode(t *testing.T) {
 		t.Fatalf("spawn: %v", err)
 	}
 	defer proc.Close()
-	defer conn.Close()
 
-	pc.Send(proto.NewMessage(proto.MsgStarted, proto.StartedPayload{
+	if err := pc.Send(proto.NewMessage(proto.MsgStarted, proto.StartedPayload{
 		Pid: proc.Cmd.Process.Pid, Client: "sh",
-	}))
+	})); err != nil {
+		t.Fatalf("send started: %v", err)
+	}
 
 	idle := NewIdleDetector(5*time.Second, func() {})
 	idle.Start()
@@ -186,9 +212,11 @@ func TestEndToEndExitCode(t *testing.T) {
 	<-proc.Wait()
 
 	code := proc.ExitCode()
-	pc.Send(proto.NewMessage(proto.MsgExited, proto.ExitedPayload{Code: code}))
+	if err := pc.Send(proto.NewMessage(proto.MsgExited, proto.ExitedPayload{Code: code})); err != nil {
+		t.Logf("send exited: %v", err)
+	}
 
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(settleTimeout)
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -201,42 +229,40 @@ func TestEndToEndExitCode(t *testing.T) {
 }
 
 func TestEndToEndOutputStreaming(t *testing.T) {
-	socketPath := filepath.Join("/tmp", "loopai-e2e-stream.sock")
-	os.Remove(socketPath)
-	t.Cleanup(func() { os.Remove(socketPath) })
+	sp := e2eSocketPath(t, "stream.sock")
 
 	var outputChunks []string
 	var mu sync.Mutex
 
 	handler := func(pc *proto.Conn) {
+		defer pc.Close()
 		for {
 			msg, err := pc.Receive()
 			if err != nil {
 				return
 			}
 			mu.Lock()
-			if msg.Type == proto.MsgOutput {
+			switch msg.Type {
+			case proto.MsgOutput:
 				var p proto.OutputPayload
-				json.Unmarshal(msg.Payload, &p)
-				outputChunks = append(outputChunks, string(p.Data))
-			}
-			if msg.Type == proto.MsgExited {
+				if err := json.Unmarshal(msg.Payload, &p); err == nil {
+					outputChunks = append(outputChunks, string(p.Data))
+				}
+			case proto.MsgExited:
 				mu.Unlock()
-				pc.Close()
 				return
 			}
 			mu.Unlock()
 		}
 	}
 
-	b := backend.New(socketPath, handler)
-	go b.Run()
-	time.Sleep(200 * time.Millisecond)
+	startE2EBackend(t, sp, handler)
 
-	conn, err := proto.Connect(socketPath)
+	conn, err := proto.Connect(sp)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
+	defer conn.Close()
 	pc := proto.NewConn(conn)
 
 	proc, err := Spawn("sh", []string{"-c", "echo line1 && echo line2 && echo line3"})
@@ -244,11 +270,12 @@ func TestEndToEndOutputStreaming(t *testing.T) {
 		t.Fatalf("spawn: %v", err)
 	}
 	defer proc.Close()
-	defer conn.Close()
 
-	pc.Send(proto.NewMessage(proto.MsgStarted, proto.StartedPayload{
+	if err := pc.Send(proto.NewMessage(proto.MsgStarted, proto.StartedPayload{
 		Pid: proc.Cmd.Process.Pid, Client: "sh",
-	}))
+	})); err != nil {
+		t.Fatalf("send started: %v", err)
+	}
 
 	idle := NewIdleDetector(5*time.Second, func() {})
 	idle.Start()
@@ -262,9 +289,11 @@ func TestEndToEndOutputStreaming(t *testing.T) {
 	<-proc.Wait()
 
 	code := proc.ExitCode()
-	pc.Send(proto.NewMessage(proto.MsgExited, proto.ExitedPayload{Code: code}))
+	if err := pc.Send(proto.NewMessage(proto.MsgExited, proto.ExitedPayload{Code: code})); err != nil {
+		t.Logf("send exited: %v", err)
+	}
 
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(settleTimeout)
 
 	mu.Lock()
 	defer mu.Unlock()

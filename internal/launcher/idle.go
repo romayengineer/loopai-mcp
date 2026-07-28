@@ -2,16 +2,15 @@ package launcher
 
 import (
 	"log"
-	"sync"
+	"sync/atomic"
 	"time"
 )
 
 type IdleDetector struct {
-	timeout  time.Duration
-	timer    *time.Timer
-	onIdle   func()
-	mu       sync.Mutex
-	stopped  bool
+	timeout time.Duration
+	onIdle  func()
+	timer   *time.Timer
+	running atomic.Bool
 }
 
 func NewIdleDetector(timeout time.Duration, onIdle func()) *IdleDetector {
@@ -22,37 +21,28 @@ func NewIdleDetector(timeout time.Duration, onIdle func()) *IdleDetector {
 }
 
 func (d *IdleDetector) Start() {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if d.stopped {
+	if !d.running.CompareAndSwap(false, true) {
 		return
 	}
 	d.timer = time.AfterFunc(d.timeout, d.fire)
 }
 
 func (d *IdleDetector) Reset() {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if d.stopped || d.timer == nil {
+	if !d.running.Load() {
 		return
 	}
 	d.timer.Reset(d.timeout)
 }
 
 func (d *IdleDetector) Stop() {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.stopped = true
-	if d.timer != nil {
-		d.timer.Stop()
+	if !d.running.CompareAndSwap(true, false) {
+		return
 	}
+	d.timer.Stop()
 }
 
 func (d *IdleDetector) fire() {
-	d.mu.Lock()
-	stopped := d.stopped
-	d.mu.Unlock()
-	if stopped {
+	if !d.running.Load() {
 		return
 	}
 	log.Printf("[idle] no output for %v", d.timeout)

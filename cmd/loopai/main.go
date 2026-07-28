@@ -35,13 +35,17 @@ func main() {
 	}
 	defer proc.Close()
 
-	pc.Send(proto.NewMessage(proto.MsgStarted, proto.StartedPayload{
+	if err := pc.Send(proto.NewMessage(proto.MsgStarted, proto.StartedPayload{
 		Pid:    proc.Cmd.Process.Pid,
 		Client: *client,
-	}))
+	})); err != nil {
+		log.Printf("send started: %v", err)
+	}
 
 	idle := launcher.NewIdleDetector(*idleTimeout, func() {
-		pc.Send(proto.NewMessage(proto.MsgIdle, proto.IdlePayload{}))
+		if err := pc.Send(proto.NewMessage(proto.MsgIdle, proto.IdlePayload{})); err != nil {
+			log.Printf("send idle: %v", err)
+		}
 	})
 	idle.Start()
 
@@ -60,9 +64,12 @@ func main() {
 
 	<-proc.Wait()
 	exitCode := proc.ExitCode()
-	pc.Send(proto.NewMessage(proto.MsgExited, proto.ExitedPayload{
+
+	if err := pc.Send(proto.NewMessage(proto.MsgExited, proto.ExitedPayload{
 		Code: exitCode,
-	}))
+	})); err != nil {
+		log.Printf("send exited: %v", err)
+	}
 
 	if exitCode != 0 {
 		fmt.Fprintf(os.Stderr, "client exited with code %d\n", exitCode)

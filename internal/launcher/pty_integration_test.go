@@ -17,7 +17,11 @@ func TestSpawnEchoAndReadOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("spawn: %v", err)
 	}
-	defer proc.Close()
+	defer func() {
+		if err := proc.Close(); err != nil {
+			t.Errorf("close: %v", err)
+		}
+	}()
 
 	var buf bytes.Buffer
 	_, err = io.Copy(&buf, proc.PTY)
@@ -67,8 +71,7 @@ func TestSpawnWriteToPTY(t *testing.T) {
 	}
 	defer proc.Close()
 
-	_, err = proc.Write([]byte("hello from PTY input\n"))
-	if err != nil {
+	if _, err := proc.Write([]byte("hello from PTY input\n")); err != nil {
 		t.Fatalf("write to PTY: %v", err)
 	}
 
@@ -113,7 +116,9 @@ func TestSpawnConcurrentReadAndWrite(t *testing.T) {
 			}
 			if strings.Contains(string(buf[:n]), "ready") {
 				once.Do(func() {
-					proc.Write([]byte("ping\n"))
+					if _, wErr := proc.Write([]byte("ping\n")); wErr != nil {
+						t.Errorf("write: %v", wErr)
+					}
 				})
 			}
 		}
@@ -152,5 +157,3 @@ func TestSpawnSignalInterrupt(t *testing.T) {
 		t.Fatal("timeout waiting for process to exit after signal")
 	}
 }
-
-

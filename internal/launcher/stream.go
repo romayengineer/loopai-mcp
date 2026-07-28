@@ -9,8 +9,10 @@ import (
 	"github.com/romayengineer/loopai-mcp/internal/proto"
 )
 
+const readBufSize = 65536
+
 func PipePTYToBackend(pc *proto.Conn, proc *PtyProcess, idle *IdleDetector) error {
-	buf := make([]byte, 65536)
+	buf := make([]byte, readBufSize)
 	for {
 		n, err := proc.Read(buf)
 		if n > 0 {

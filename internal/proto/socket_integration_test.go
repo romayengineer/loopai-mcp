@@ -5,7 +5,6 @@ package proto_test
 import (
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/romayengineer/loopai-mcp/internal/proto"
@@ -13,23 +12,22 @@ import (
 
 func socketPath(t *testing.T, name string) string {
 	t.Helper()
-	// Use /tmp directly to avoid long paths that exceed Unix socket length limits.
-	path := filepath.Join("/tmp", "loopai-test-"+name)
+	path := "/tmp/loopai-test-" + name
 	os.Remove(path)
 	t.Cleanup(func() { os.Remove(path) })
 	return path
 }
 
 func TestSocketListenConnectRoundTrip(t *testing.T) {
-	socketPath := socketPath(t, "roundtrip.sock")
+	sp := socketPath(t, "roundtrip.sock")
 
-	ln, err := proto.Listen(socketPath)
+	ln, err := proto.Listen(sp)
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
 	defer ln.Close()
 
-	conn, err := proto.Connect(socketPath)
+	conn, err := proto.Connect(sp)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
@@ -79,15 +77,15 @@ func TestSocketListenConnectRoundTrip(t *testing.T) {
 }
 
 func TestSocketMultipleMessages(t *testing.T) {
-	socketPath := socketPath(t, "multi.sock")
+	sp := socketPath(t, "multi.sock")
 
-	ln, err := proto.Listen(socketPath)
+	ln, err := proto.Listen(sp)
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
 	defer ln.Close()
 
-	conn, err := proto.Connect(socketPath)
+	conn, err := proto.Connect(sp)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
@@ -137,27 +135,31 @@ func TestSocketDefaultPath(t *testing.T) {
 }
 
 func TestSocketCleanupOnListen(t *testing.T) {
-	socketPath := socketPath(t, "cleanup.sock")
+	sp := socketPath(t, "cleanup.sock")
 
-	os.WriteFile(socketPath, []byte("stale"), 0644)
-
-	ln, err := proto.Listen(socketPath)
-	if err != nil {
-		t.Fatalf("listen: %v", err)
+	if err := os.WriteFile(sp, []byte("stale"), 0644); err != nil {
+		t.Fatalf("write stale: %v", err)
 	}
-	ln.Close()
+
+	ln, err := proto.Listen(sp)
+	if err != nil {
+		t.Fatalf("listen (should remove stale): %v", err)
+	}
+	if err := ln.Close(); err != nil {
+		t.Errorf("close listener: %v", err)
+	}
 }
 
 func TestSocketBinaryPayload(t *testing.T) {
-	socketPath := socketPath(t, "binary.sock")
+	sp := socketPath(t, "binary.sock")
 
-	ln, err := proto.Listen(socketPath)
+	ln, err := proto.Listen(sp)
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
 	defer ln.Close()
 
-	conn, err := proto.Connect(socketPath)
+	conn, err := proto.Connect(sp)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}

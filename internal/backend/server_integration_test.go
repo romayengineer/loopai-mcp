@@ -4,7 +4,6 @@ package backend
 
 import (
 	"os"
-	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -12,12 +11,27 @@ import (
 	"github.com/romayengineer/loopai-mcp/internal/proto"
 )
 
+const testStartupTimeout = 200 * time.Millisecond
+
 func socketPath(t *testing.T, name string) string {
 	t.Helper()
-	path := filepath.Join("/tmp", "loopai-test-"+name)
+	path := "/tmp/loopai-test-" + name
 	os.Remove(path)
 	t.Cleanup(func() { os.Remove(path) })
 	return path
+}
+
+func startTestBackend(t *testing.T, sp string, handler func(*proto.Conn)) *Backend {
+	t.Helper()
+	b := New(sp, handler)
+	go func() {
+		if err := b.Run(); err != nil {
+			t.Logf("backend exited: %v", err)
+		}
+	}()
+	t.Cleanup(func() { b.Stop() })
+	time.Sleep(testStartupTimeout)
+	return b
 }
 
 func TestBackendAcceptsLauncher(t *testing.T) {
@@ -36,16 +50,12 @@ func TestBackendAcceptsLauncher(t *testing.T) {
 		}
 		started.Store(true)
 
-		pc.Send(proto.NewMessage(proto.MsgType, proto.TypePayload{Text: "hello"}))
+		if err := pc.Send(proto.NewMessage(proto.MsgType, proto.TypePayload{Text: "hello"})); err != nil {
+			t.Errorf("send reply: %v", err)
+		}
 	}
 
-	backend := New(sp, handler)
-	go func() {
-		if err := backend.Run(); err != nil {
-			t.Errorf("backend: %v", err)
-		}
-	}()
-	time.Sleep(200 * time.Millisecond)
+	startTestBackend(t, sp, handler)
 
 	conn, err := proto.Connect(sp)
 	if err != nil {
@@ -54,7 +64,9 @@ func TestBackendAcceptsLauncher(t *testing.T) {
 	defer conn.Close()
 
 	pc := proto.NewConn(conn)
-	pc.Send(proto.NewMessage(proto.MsgStarted, proto.StartedPayload{Pid: 1, Client: "test"}))
+	if err := pc.Send(proto.NewMessage(proto.MsgStarted, proto.StartedPayload{Pid: 1, Client: "test"})); err != nil {
+		t.Fatalf("send started: %v", err)
+	}
 
 	msg, err := pc.Receive()
 	if err != nil {
@@ -86,11 +98,7 @@ func TestBackendFullExchange(t *testing.T) {
 		}
 	}
 
-	backend := New(sp, handler)
-	go func() {
-		backend.Run()
-	}()
-	time.Sleep(200 * time.Millisecond)
+	startTestBackend(t, sp, handler)
 
 	conn, err := proto.Connect(sp)
 	if err != nil {
@@ -99,8 +107,15 @@ func TestBackendFullExchange(t *testing.T) {
 	defer conn.Close()
 
 	pc := proto.NewConn(conn)
-	pc.Send(proto.NewMessage(proto.MsgStarted, proto.StartedPayload{Pid: 1, Client: "test"}))
-	pc.Send(proto.NewMessage(proto.MsgOutput, proto.OutputPayload{Data: []byte("test output\n")}))
-	pc.Send(proto.NewMessage(proto.MsgIdle, proto.IdlePayload{}))
-	pc.Send(proto.NewMessage(proto.MsgExited, proto.ExitedPayload{Code: 0}))
+
+	send := func(msg proto.Message) {
+		if err := pc.Send(msg); err != nil {
+			t.Errorf("send: %v", err)
+		}
+	}
+
+	send(proto.NewMessage(proto.MsgStarted, proto.StartedPayload{Pid: 1, Client: "test"}))
+	send(proto.NewMessage(proto.MsgOutput, proto.OutputPayload{Data: []byte("test output\n")}))
+	send(proto.NewMessage(proto.MsgIdle, proto.IdlePayload{}))
+	send(proto.NewMessage(proto.MsgExited, proto.ExitedPayload{Code: 0}))
 }
