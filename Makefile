@@ -1,4 +1,4 @@
-.PHONY: all build test-unit test-integration test-all test fmt vet lint install-hooks clean
+.PHONY: all build test-unit test-integration test-all test cover fmt vet lint install-hooks clean
 
 all: build lint test-all
 
@@ -32,6 +32,14 @@ test-all: test-unit test-integration
 
 test:
 	go test -tags=integration ./internal/... -count=1 -timeout 30s
+
+cover:
+	@go test -coverprofile=/tmp/loopai-cover.out ./internal/... -count=1 -timeout 30s > /dev/null 2>&1
+	@go test -coverprofile=/tmp/loopai-cover-integration.out -coverpkg=./internal/... -tags=integration ./internal/... -count=1 -timeout 30s > /dev/null 2>&1
+	@echo "=== Unit test coverage ==="
+	@go tool cover -func=/tmp/loopai-cover.out | grep total | awk '{print $$3}'
+	@echo "=== Combined (unit + integration) coverage ==="
+	@go tool cover -func=/tmp/loopai-cover-integration.out | grep total | awk '{print $$3}'
 
 install-hooks:
 	git config core.hooksPath .githooks
