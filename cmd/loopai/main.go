@@ -109,7 +109,7 @@ func main() {
 		}
 
 		go func() {
-			written, err := filterCSIu(proc, os.Stdin)
+			written, err := filterCSI(proc, os.Stdin)
 			if err != nil {
 				slog.Warn("stdin filter", "written", written, "error", err)
 			}

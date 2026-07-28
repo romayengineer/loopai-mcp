@@ -31,10 +31,10 @@ func TestDefaultClientEmptyEnv(t *testing.T) {
 	}
 }
 
-func TestFilterCSIuPlainText(t *testing.T) {
+func TestFilterCSIPlainText(t *testing.T) {
 	var buf bytes.Buffer
 	input := []byte("hello world\n")
-	n, err := filterCSIu(&buf, bytes.NewReader(input))
+	n, err := filterCSI(&buf, bytes.NewReader(input))
 	if err != nil && err.Error() != "EOF" {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -46,12 +46,12 @@ func TestFilterCSIuPlainText(t *testing.T) {
 	}
 }
 
-func TestFilterCSIuStripsSequence(t *testing.T) {
+func TestFilterCSIStripsSequence(t *testing.T) {
 	var buf bytes.Buffer
 	// CSI u sequence for F1: ESC [ < 3 5 ; 5 u
 	// Should be stripped, only "abc" should pass through
 	input := []byte("a\x1b[<35;5ubc")
-	n, err := filterCSIu(&buf, bytes.NewReader(input))
+	n, err := filterCSI(&buf, bytes.NewReader(input))
 	if err != nil && err.Error() != "EOF" {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -63,11 +63,11 @@ func TestFilterCSIuStripsSequence(t *testing.T) {
 	}
 }
 
-func TestFilterCSIuMultipleSeqs(t *testing.T) {
+func TestFilterCSIMultipleSeqs(t *testing.T) {
 	var buf bytes.Buffer
 	// Two CSI u sequences with text between
 	input := []byte("a\x1b[<1;2ub\x1b[<3;4;5uc")
-	n, err := filterCSIu(&buf, bytes.NewReader(input))
+	n, err := filterCSI(&buf, bytes.NewReader(input))
 	if err != nil && err.Error() != "EOF" {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -79,11 +79,11 @@ func TestFilterCSIuMultipleSeqs(t *testing.T) {
 	}
 }
 
-func TestFilterCSIuNonCSIEscape(t *testing.T) {
+func TestFilterCSINonCSIEscape(t *testing.T) {
 	var buf bytes.Buffer
 	// ESC followed by non-'[' (not a CSI sequence) should pass through
 	input := []byte("a\x1bXb")
-	n, err := filterCSIu(&buf, bytes.NewReader(input))
+	n, err := filterCSI(&buf, bytes.NewReader(input))
 	if err != nil && err.Error() != "EOF" {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -95,27 +95,75 @@ func TestFilterCSIuNonCSIEscape(t *testing.T) {
 	}
 }
 
-func TestFilterCSIuNonCSIuBracket(t *testing.T) {
+func TestFilterCSINonCSIuBracket(t *testing.T) {
 	var buf bytes.Buffer
-	// ESC [ followed by non-'<' (CSI but not CSI u) should pass through
+	// CSI sequence ESC [ 1 m should be stripped (final byte 'm' is 0x40-0x7E)
 	input := []byte("a\x1b[1mb")
-	n, err := filterCSIu(&buf, bytes.NewReader(input))
+	n, err := filterCSI(&buf, bytes.NewReader(input))
 	if err != nil && err.Error() != "EOF" {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if n != 6 {
-		t.Fatalf("expected 6 bytes ('a\\x1b[1mb'), got %d", n)
+	if n != 2 {
+		t.Fatalf("expected 2 bytes ('ab'), got %d", n)
 	}
-	if buf.String() != "a\x1b[1mb" {
-		t.Fatalf("expected 'a\\x1b[1mb', got %q", buf.String())
+	if buf.String() != "ab" {
+		t.Fatalf("expected 'ab', got %q", buf.String())
 	}
 }
 
-func TestFilterCSIuPartialAtEOF(t *testing.T) {
+func TestFilterCSIArrowKeys(t *testing.T) {
+	var buf bytes.Buffer
+	// Arrow up/down/right/left
+	input := []byte("a\x1b[A\x1b[B\x1b[C\x1b[Dx")
+	n, err := filterCSI(&buf, bytes.NewReader(input))
+	if err != nil && err.Error() != "EOF" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("expected 2 bytes ('ax'), got %d", n)
+	}
+	if buf.String() != "ax" {
+		t.Fatalf("expected 'ax', got %q", buf.String())
+	}
+}
+
+func TestFilterCSIModifiedArrow(t *testing.T) {
+	var buf bytes.Buffer
+	// Ctrl+right = ESC [ 1 ; 5 C (CSI with params before final byte)
+	input := []byte("a\x1b[1;5Cb")
+	n, err := filterCSI(&buf, bytes.NewReader(input))
+	if err != nil && err.Error() != "EOF" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("expected 2 bytes ('ab'), got %d", n)
+	}
+	if buf.String() != "ab" {
+		t.Fatalf("expected 'ab', got %q", buf.String())
+	}
+}
+
+func TestFilterCSSS3(t *testing.T) {
+	var buf bytes.Buffer
+	// SS3 F1-F4 = ESC O P/Q/R/S
+	input := []byte("a\x1bOP\x1bOQ\x1bOR\x1bOSb")
+	n, err := filterCSI(&buf, bytes.NewReader(input))
+	if err != nil && err.Error() != "EOF" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("expected 2 bytes ('ab'), got %d", n)
+	}
+	if buf.String() != "ab" {
+		t.Fatalf("expected 'ab', got %q", buf.String())
+	}
+}
+
+func TestFilterCSIPartialAtEOF(t *testing.T) {
 	var buf bytes.Buffer
 	// Incomplete CSI u at EOF — should flush as-is
 	input := []byte("a\x1b[<35")
-	n, err := filterCSIu(&buf, bytes.NewReader(input))
+	n, err := filterCSI(&buf, bytes.NewReader(input))
 	if err == nil || err.Error() != "EOF" {
 		t.Fatalf("expected EOF, got %v", err)
 	}
@@ -124,6 +172,22 @@ func TestFilterCSIuPartialAtEOF(t *testing.T) {
 	}
 	if buf.String() != "a\x1b[<35" {
 		t.Fatalf("expected 'a\\x1b[<35', got %q", buf.String())
+	}
+}
+
+func TestFilterCSIHomeEnd(t *testing.T) {
+	var buf bytes.Buffer
+	// Home = ESC [ H or ESC [ 1 ~, End = ESC [ F or ESC [ 4 ~
+	input := []byte("a\x1b[H\x1b[Fb")
+	n, err := filterCSI(&buf, bytes.NewReader(input))
+	if err != nil && err.Error() != "EOF" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("expected 2 bytes ('ab'), got %d", n)
+	}
+	if buf.String() != "ab" {
+		t.Fatalf("expected 'ab', got %q", buf.String())
 	}
 }
 
