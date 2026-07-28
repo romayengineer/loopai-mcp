@@ -65,9 +65,9 @@ var compilePatterns = []phaseMatch{
 }
 
 var testPatterns = []phaseMatch{
-	{Trigger: regexp.MustCompile(`^ok\s+\S+`), Result: ResultSuccess},
+	{Trigger: regexp.MustCompile(`(?m)^ok\s+\S+`), Result: ResultSuccess},
 	{Trigger: regexp.MustCompile(`(?m)^--- FAIL:\s+Test`), Result: ResultFailure},
-	{Trigger: regexp.MustCompile(`^FAIL\s+\S+`), Result: ResultFailure},
+	{Trigger: regexp.MustCompile(`(?m)^FAIL\s+\S+`), Result: ResultFailure},
 	{Trigger: regexp.MustCompile(`(?m)^\t\S+\.go:\d+: `), Result: ResultFailure},
 	{Trigger: regexp.MustCompile(`(?m)WARNING: DATA RACE`), Result: ResultFailure},
 }
@@ -119,6 +119,12 @@ func analyzeOutput(output string, p Phase) PhaseResult {
 		if pm.Trigger.MatchString(output) {
 			return pm.Result
 		}
+	}
+	// For compile and lint, no error patterns in the output means the tool
+	// produced no output, which means success (go build / golangci-lint print
+	// nothing on success, only on failure).
+	if p == PhaseCompile || p == PhaseLint {
+		return ResultSuccess
 	}
 	return ResultUnknown
 }

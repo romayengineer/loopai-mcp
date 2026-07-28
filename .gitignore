@@ -1,5 +1,7 @@
+*.exe
+*.raw
+/tmp/
+dist/
 loopai
 loopai-backend
-*.exe
-dist/
-/tmp/
+loopai-capture

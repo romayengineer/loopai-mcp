@@ -75,8 +75,8 @@ Write at 0x123 by goroutine 5:`
 
 func TestAnalyzeEmptyCompileOutput(t *testing.T) {
 	r := analyzeOutput("", PhaseCompile)
-	if r != ResultUnknown {
-		t.Fatalf("expected ResultUnknown, got %s", r)
+	if r != ResultSuccess {
+		t.Fatalf("expected ResultSuccess (no errors = success), got %s", r)
 	}
 }
 
@@ -131,5 +131,85 @@ func TestOutputBufferKeepsLatestPhase(t *testing.T) {
 	buf.Write([]byte("> go test"))
 	if p := buf.CurrentPhase(); p != PhaseTest {
 		t.Fatalf("expected PhaseTest (latest trigger), got %s", p)
+	}
+}
+
+func TestMultiChunkCompileError(t *testing.T) {
+	buf := NewOutputBuffer()
+	buf.Write([]byte("I'll build the project now.\n"))
+	buf.Write([]byte("> go build ./...\n"))
+	buf.Write([]byte("# github.com/user/repo\n"))
+	buf.Write([]byte("./main.go:23:2: undefined: Foo\n"))
+	result := buf.Analyze()
+	if result.Phase != PhaseCompile {
+		t.Fatalf("expected PhaseCompile, got %s", result.Phase)
+	}
+	if result.Result != ResultFailure {
+		t.Fatalf("expected ResultFailure, got %s", result.Result)
+	}
+}
+
+func TestMultiChunkCompileSuccessThenTestFail(t *testing.T) {
+	buf := NewOutputBuffer()
+	buf.Write([]byte("> go build ./...\n"))
+	buf.Write([]byte("")) // empty = success (no errors)
+	r1 := buf.Analyze()
+	if r1.Phase != PhaseCompile || r1.Result != ResultSuccess {
+		t.Fatalf("compile: expected success, got %s/%s", r1.Phase, r1.Result)
+	}
+
+	buf.Reset()
+	buf.Write([]byte("Now running tests.\n"))
+	buf.Write([]byte("> go test ./...\n"))
+	buf.Write([]byte("--- FAIL: TestAdd\n    add_test.go:10: got 4, want 5\nFAIL\n"))
+	r2 := buf.Analyze()
+	if r2.Phase != PhaseTest || r2.Result != ResultFailure {
+		t.Fatalf("test: expected failure, got %s/%s", r2.Phase, r2.Result)
+	}
+}
+
+func TestNoFalsePositiveOnNaturalLanguage(t *testing.T) {
+	buf := NewOutputBuffer()
+	buf.Write([]byte("We need to refactor this codebase.\n"))
+	buf.Write([]byte("The build is taking too long.\n"))
+	buf.Write([]byte("I think we should split the package.\n"))
+	result := buf.Analyze()
+	if result.Phase != PhaseUnknown {
+		t.Fatalf("expected PhaseUnknown for natural language, got %s", result.Phase)
+	}
+}
+
+func TestLintThenTestSequence(t *testing.T) {
+	buf := NewOutputBuffer()
+	buf.Write([]byte("> golangci-lint run ./...\n"))
+	buf.Write([]byte("")) // empty = lint passed
+	r1 := buf.Analyze()
+	if r1.Phase != PhaseLint || r1.Result != ResultSuccess {
+		t.Fatalf("lint: expected success, got %s/%s", r1.Phase, r1.Result)
+	}
+
+	buf.Reset()
+	buf.Write([]byte("> go test ./...\n"))
+	buf.Write([]byte("ok  github.com/user/repo\t0.234s\n"))
+	r2 := buf.Analyze()
+	if r2.Phase != PhaseTest || r2.Result != ResultSuccess {
+		t.Fatalf("test: expected success, got %s/%s", r2.Phase, r2.Result)
+	}
+}
+
+func TestToolCallFraming(t *testing.T) {
+	// Simulate Claude Code's tool call output format.
+	buf := NewOutputBuffer()
+	buf.Write([]byte("I'll check the code first.\n"))
+	buf.Write([]byte("\n"))
+	buf.Write([]byte("> Tool\n"))
+	buf.Write([]byte("  Reading file: main.go\n"))
+	buf.Write([]byte("  Let me run go build\n"))
+	buf.Write([]byte("> Bash\n"))
+	buf.Write([]byte("  $ go build ./...\n"))
+	buf.Write([]byte("  ./main.go:5:2: undefined: Bar\n"))
+	result := buf.Analyze()
+	if result.Phase == PhaseUnknown {
+		t.Fatal("expected a phase to be detected even with tool call framing")
 	}
 }

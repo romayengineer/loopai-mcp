@@ -88,13 +88,6 @@ func (g *Gate) handleIdle(pc *proto.Conn) {
 	res := result.Result
 	g.output.Reset()
 
-	// For compile and lint, unknown result with a triggered phase means
-	// the tool produced no output = success (go build / golangci-lint print
-	// nothing on success, only on failure).
-	if (phase == PhaseCompile || phase == PhaseLint) && res == ResultUnknown {
-		res = ResultSuccess
-	}
-
 	slog.Debug("idle analysis",
 		"phase", phase,
 		"result", res,
