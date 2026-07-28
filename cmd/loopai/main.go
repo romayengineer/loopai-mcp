@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -19,6 +20,7 @@ func main() {
 	client := flag.String("client", defaultClient(), "client binary to spawn (claude, opencode, etc.)")
 	socketPath := flag.String("socket", proto.DefaultSocketPath(), "unix socket path")
 	idleTimeout := flag.Duration("idle", defaultIdleTimeout, "idle timeout before signaling backend")
+	passthrough := flag.Bool("passthrough", false, "show PTY output on terminal")
 	flag.Parse()
 
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
@@ -78,9 +80,15 @@ func main() {
 	})
 	idle.Start()
 
+	// Wrap the PTY reader with optional passthrough to terminal
+	r := io.Reader(proc)
+	if *passthrough {
+		r = io.TeeReader(proc, os.Stdout)
+	}
+
 	errCh := make(chan error, 2)
 	go func() {
-		err := launcher.PipePTYToBackend(ctx, pc, proc, idle)
+		err := launcher.PipePTYToBackend(ctx, pc, r, idle)
 		errCh <- err
 	}()
 	go func() {

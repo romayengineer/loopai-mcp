@@ -70,10 +70,11 @@ The backend watches terminal output. When it detects `go build`/`go test`/`golan
 ### Flags
 
 | Flag | Default | Description |
-|---|---|---|
+|---|---|---|---|
 | `-client` | `claude` (or `$LOOPAI_CLIENT`) | Client binary to spawn |
 | `-socket` | `~/.config/loopai/loopai.sock` | Unix socket path |
 | `-idle` | `5s` | Idle timeout before signaling backend |
+| `-passthrough` | `false` | Show PTY output on terminal alongside backend enforcement |
 
 ## Enforcement gates
 
