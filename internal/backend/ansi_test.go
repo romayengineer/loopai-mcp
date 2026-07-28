@@ -154,6 +154,27 @@ func TestStripANSIIncompleteDCS(t *testing.T) {
 	}
 }
 
+func FuzzStripANSI(f *testing.F) {
+	f.Add([]byte("hello"))
+	f.Add([]byte("\x1b[31mred\x1b[0m"))
+	f.Add([]byte("\x1b[38;5;196m\x1b[1mbold\x1b[0m"))
+	f.Add([]byte("line1\x1b[K\nline2\x1b[J"))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		result := StripANSI(data)
+		// Must never panic
+		// Must never produce more bytes than input
+		if len(result) > len(data) {
+			t.Fatalf("result len %d > input len %d", len(result), len(data))
+		}
+		// Result must not contain ESC byte
+		for _, b := range result {
+			if b == 0x1B {
+				t.Fatal("result contains ESC byte")
+			}
+		}
+	})
+}
+
 func TestStripANSIOnlyEscape(t *testing.T) {
 	// Input that is ONLY escape sequences should produce empty output
 	in := []byte("\x1b[31m\x1b[1m\x1b[0m")

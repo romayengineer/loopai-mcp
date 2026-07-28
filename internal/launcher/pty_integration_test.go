@@ -6,8 +6,10 @@ import (
 	"bytes"
 	"io"
 	"os"
+	"os/exec"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -190,6 +192,64 @@ func TestPtyProcessResize(t *testing.T) {
 	}
 	if !strings.Contains(output, "columns 80;") && !strings.Contains(output, "columns 80") {
 		t.Fatalf("expected stty output to show columns 80, got: %q", output)
+	}
+}
+
+func TestForwardSignalsDonePath(t *testing.T) {
+	// The done path of forwardSignals should cause the function to exit
+	// without forwarding any signal.
+	cmd := exec.Command("sh", "-c", "sleep 10")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer cmd.Process.Kill()
+
+	done := make(chan struct{})
+	sigCh := make(chan os.Signal, 1)
+
+	go forwardSignals(cmd, done, sigCh)
+
+	// Close done first, then send. The done path should be taken.
+	close(done)
+	sigCh <- syscall.SIGUSR1
+
+	// Process should still be running (signal was not forwarded)
+	// Kill it and verify it wasn't already dead
+	if err := cmd.Process.Signal(os.Kill); err != nil {
+		t.Fatalf("process should still be alive after done path: %v", err)
+	}
+	cmd.Wait()
+}
+
+func TestForwardSignalsSignalPath(t *testing.T) {
+	// The signal path should forward the signal to the process.
+	cmd := exec.Command("sh", "-c", "trap 'exit 42' USR1; while true; do sleep 1; done")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	// No defer Kill - the process should exit via the signal
+
+	done := make(chan struct{})
+	sigCh := make(chan os.Signal, 1)
+
+	go forwardSignals(cmd, done, sigCh)
+
+	// Give the shell time to install the trap before we send the signal
+	time.Sleep(50 * time.Millisecond)
+
+	sigCh <- syscall.SIGUSR1
+
+	err := cmd.Wait()
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		if code := exitErr.ExitCode(); code != 42 {
+			t.Fatalf("expected exit code 42, got %d", code)
+		}
+	} else if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// err == nil means process exited with 0, not expected
+	if err == nil {
+		t.Fatal("expected process to exit with non-zero code from signal handler")
 	}
 }
 

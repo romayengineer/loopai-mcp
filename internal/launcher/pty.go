@@ -98,13 +98,17 @@ func Spawn(client string, args []string) (Process, error) {
 	return p, nil
 }
 
-func forwardSignals(cmd *exec.Cmd, done <-chan struct{}) {
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
-	defer signal.Stop(sigCh)
+func forwardSignals(cmd *exec.Cmd, done <-chan struct{}, sigCh ...chan os.Signal) {
+	ch := make(chan os.Signal, 1)
+	if len(sigCh) > 0 && sigCh[0] != nil {
+		ch = sigCh[0]
+	} else {
+		signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+		defer signal.Stop(ch)
+	}
 
 	select {
-	case sig := <-sigCh:
+	case sig := <-ch:
 		if cmd.Process != nil {
 			if err := cmd.Process.Signal(sig); err != nil {
 				slog.Warn("forward signal", "signal", sig, "error", err)

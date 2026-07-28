@@ -36,89 +36,35 @@ func (c *mockLauncherConn) Close() error {
 	return nil
 }
 
-func TestGateHandleIdleCompileSuccess(t *testing.T) {
-	gate := NewGate(&mockAnalyzer{
-		result: GateResult{Phase: PhaseCompile, Result: ResultSuccess},
-	})
-	var conn mockLauncherConn
-
-	gate.handleIdle(context.Background(), &conn)
-	if len(conn.messages) != 1 {
-		t.Fatalf("expected 1 message, got %d", len(conn.messages))
+func TestGateHandleIdle(t *testing.T) {
+	tests := []struct {
+		name   string
+		phase  Phase
+		result PhaseResult
+		want   int // expected number of messages
+	}{
+		{"compile success", PhaseCompile, ResultSuccess, 1},
+		{"compile failure", PhaseCompile, ResultFailure, 1},
+		{"lint success", PhaseLint, ResultSuccess, 1},
+		{"lint failure", PhaseLint, ResultFailure, 1},
+		{"test success", PhaseTest, ResultSuccess, 1},
+		{"test failure", PhaseTest, ResultFailure, 1},
+		{"unknown phase", PhaseUnknown, ResultUnknown, 0},
 	}
-	if conn.messages[0].Type != proto.MsgType {
-		t.Fatalf("expected MsgType, got %s", conn.messages[0].Type)
-	}
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gate := NewGate(&mockAnalyzer{
+				result: GateResult{Phase: tt.phase, Result: tt.result},
+			})
+			var conn mockLauncherConn
 
-func TestGateHandleIdleCompileFailure(t *testing.T) {
-	gate := NewGate(&mockAnalyzer{
-		result: GateResult{Phase: PhaseCompile, Result: ResultFailure},
-	})
-	var conn mockLauncherConn
-
-	gate.handleIdle(context.Background(), &conn)
-	if len(conn.messages) != 1 {
-		t.Fatalf("expected 1 message, got %d", len(conn.messages))
-	}
-}
-
-func TestGateHandleIdleLintSuccess(t *testing.T) {
-	gate := NewGate(&mockAnalyzer{
-		result: GateResult{Phase: PhaseLint, Result: ResultSuccess},
-	})
-	var conn mockLauncherConn
-
-	gate.handleIdle(context.Background(), &conn)
-	if len(conn.messages) != 1 {
-		t.Fatalf("expected 1 message, got %d", len(conn.messages))
-	}
-}
-
-func TestGateHandleIdleLintFailure(t *testing.T) {
-	gate := NewGate(&mockAnalyzer{
-		result: GateResult{Phase: PhaseLint, Result: ResultFailure},
-	})
-	var conn mockLauncherConn
-
-	gate.handleIdle(context.Background(), &conn)
-	if len(conn.messages) != 1 {
-		t.Fatalf("expected 1 message, got %d", len(conn.messages))
-	}
-}
-
-func TestGateHandleIdleTestSuccess(t *testing.T) {
-	gate := NewGate(&mockAnalyzer{
-		result: GateResult{Phase: PhaseTest, Result: ResultSuccess},
-	})
-	var conn mockLauncherConn
-
-	gate.handleIdle(context.Background(), &conn)
-	if len(conn.messages) != 1 {
-		t.Fatalf("expected 1 message, got %d", len(conn.messages))
-	}
-}
-
-func TestGateHandleIdleTestFailure(t *testing.T) {
-	gate := NewGate(&mockAnalyzer{
-		result: GateResult{Phase: PhaseTest, Result: ResultFailure},
-	})
-	var conn mockLauncherConn
-
-	gate.handleIdle(context.Background(), &conn)
-	if len(conn.messages) != 1 {
-		t.Fatalf("expected 1 message, got %d", len(conn.messages))
-	}
-}
-
-func TestGateHandleIdleUnknownPhase(t *testing.T) {
-	gate := NewGate(&mockAnalyzer{
-		result: GateResult{Phase: PhaseUnknown, Result: ResultUnknown},
-	})
-	var conn mockLauncherConn
-
-	gate.handleIdle(context.Background(), &conn)
-	if len(conn.messages) != 0 {
-		t.Fatalf("expected 0 messages for unknown phase, got %d", len(conn.messages))
+			gate.handleIdle(context.Background(), &conn)
+			if len(conn.messages) != tt.want {
+				t.Fatalf("expected %d messages, got %d", tt.want, len(conn.messages))
+			}
+			if tt.want > 0 && conn.messages[0].Type != proto.MsgType {
+				t.Fatalf("expected MsgType, got %s", conn.messages[0].Type)
+			}
+		})
 	}
 }

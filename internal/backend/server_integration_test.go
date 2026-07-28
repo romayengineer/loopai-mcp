@@ -143,3 +143,24 @@ func TestBackendFullExchange(t *testing.T) {
 		send(msg)
 	}
 }
+
+func TestBackendRunStopRace(t *testing.T) {
+	sp := socketPath(t, "runstop.sock")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	b := New(sp, func(_ context.Context, _ LauncherConn) {})
+	defer cancel()
+
+	// Start Run in the background - it will block on ln.Accept()
+	go func() {
+		b.Run(ctx)
+	}()
+
+	time.Sleep(testStartupTimeout)
+
+	// Stop while Run is blocked on Accept
+	b.Stop()
+
+	// Should not panic or deadlock
+	time.Sleep(100 * time.Millisecond)
+}
