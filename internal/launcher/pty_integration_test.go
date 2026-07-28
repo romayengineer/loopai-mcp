@@ -4,6 +4,7 @@ package launcher
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -251,6 +252,65 @@ func TestForwardSignalsSignalPath(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected process to exit with non-zero code from signal handler")
 	}
+}
+
+func TestPtyProcessResizeClosed(t *testing.T) {
+	pp, err := PtyProcessFromSpawn("echo", []string{"test"})
+	if err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+	defer pp.Close()
+
+	// Close the PTY fd directly
+	pp.PTY.Close()
+
+	err = pp.Resize(20, 80)
+	if err == nil {
+		t.Fatal("expected error resizing closed PTY")
+	}
+}
+
+func TestPtyProcessWriteClosed(t *testing.T) {
+	pp, err := PtyProcessFromSpawn("echo", []string{"test"})
+	if err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+	defer pp.Close()
+
+	pp.PTY.Close()
+
+	_, err = pp.Write([]byte("hello"))
+	if err == nil {
+		t.Fatal("expected error writing to closed PTY")
+	}
+}
+
+func TestPtyProcessSignalRunning(t *testing.T) {
+	pp, err := PtyProcessFromSpawn("sh", []string{"-c", "trap '' USR1; while true; do sleep 1; done"})
+	if err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+	defer pp.Close()
+
+	time.Sleep(50 * time.Millisecond)
+
+	if err := pp.Signal(syscall.SIGUSR1); err != nil {
+		t.Fatalf("signal: %v", err)
+	}
+}
+
+// PtyProcessFromSpawn is a helper that spawns a process and returns the underlying *PtyProcess.
+func PtyProcessFromSpawn(client string, args []string) (*PtyProcess, error) {
+	proc, err := Spawn(client, args)
+	if err != nil {
+		return nil, err
+	}
+	pp, ok := proc.(*PtyProcess)
+	if !ok {
+		proc.Close()
+		return nil, fmt.Errorf("Spawn did not return *PtyProcess")
+	}
+	return pp, nil
 }
 
 func TestPtyProcessCloseWhenDone(t *testing.T) {

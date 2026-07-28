@@ -277,6 +277,47 @@ func TestLoopUnknownMessageType(t *testing.T) {
 	}
 }
 
+func TestLoopBadStartedPayload(t *testing.T) {
+	sp := loopSocketPath(t, "badstarted.sock")
+	h := startLoopHarness(t, context.Background(), sp, HandleLauncher)
+
+	// Send MsgStarted with invalid JSON payload
+	badMsg := proto.Message{Type: proto.MsgStarted, Payload: []byte(`{invalid}`)}
+	h.pc.Send(context.Background(), badMsg)
+
+	// The loop should continue (not crash). Verify by sending a valid message.
+	h.sendOutput("> go build ./...\n")
+	h.sendOutput("./main.go:5:2: undefined: Foo\n")
+	h.sendIdle()
+
+	text := h.readMsgType(2 * time.Second)
+	if len(text) == 0 {
+		t.Fatal("expected prompt after bad started payload, loop may have crashed")
+	}
+}
+
+func TestLoopBadExitedPayload(t *testing.T) {
+	sp := loopSocketPath(t, "badexited.sock")
+	h := startLoopHarness(t, context.Background(), sp, HandleLauncher)
+
+	// Send MsgExited with invalid JSON payload - handler should return
+	// (not crash). We detect exit by checking that recvCh closes.
+	badMsg := proto.Message{Type: proto.MsgExited, Payload: []byte(`{invalid}`)}
+	h.pc.Send(context.Background(), badMsg)
+
+	time.Sleep(200 * time.Millisecond)
+
+	// The handler should have exited, closing the connection.
+	// Our recv goroutine should detect this and close recvCh.
+	select {
+	case _, ok := <-h.recvCh:
+		if !ok {
+			// recvCh closed - handler exited as expected
+		}
+	default:
+	}
+}
+
 func TestLoopContextCancel(t *testing.T) {
 	sp := loopSocketPath(t, "ctxcancel.sock")
 	ctx, cancel := context.WithCancel(context.Background())

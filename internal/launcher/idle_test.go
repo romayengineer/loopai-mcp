@@ -92,6 +92,22 @@ func TestIdleDetectorConcurrentReset(t *testing.T) {
 	// Test passes if no panic from timer race
 }
 
+func TestIdleDetectorFireAfterStop(t *testing.T) {
+	var fired atomic.Bool
+	detector := NewIdleDetector(20*time.Millisecond, func() {
+		fired.Store(true)
+	})
+	detector.Start()
+	detector.Stop()
+
+	// Wait long enough for the timer to have fired
+	time.Sleep(50 * time.Millisecond)
+
+	if fired.Load() {
+		t.Fatal("expected callback NOT to fire after Stop")
+	}
+}
+
 func TestIdleDetectorStartRace(t *testing.T) {
 	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {

@@ -6,6 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/romayengineer/loopai-mcp/internal/proto"
@@ -230,6 +232,42 @@ func TestConnectNonexistentSocket(t *testing.T) {
 	_, err := proto.Connect("/tmp/loopai-test-nonexistent-12345.sock")
 	if err == nil {
 		t.Fatal("expected error for Connect to nonexistent socket")
+	}
+}
+
+func TestListenPathTooLong(t *testing.T) {
+	// Create a socket path that exceeds the Unix socket max path length (~108 bytes).
+	dir, err := os.MkdirTemp("", "loopai-test-*")
+	if err != nil {
+		t.Fatalf("temp dir: %v", err)
+	}
+	defer os.RemoveAll(dir)
+
+	// Build a path > 108 bytes so net.Listen("unix", path) fails
+	longPath := filepath.Join(dir, strings.Repeat("a", 150))
+	_, err = proto.Listen(longPath)
+	if err == nil {
+		t.Fatal("expected error when listening with too-long socket path")
+	}
+}
+
+func TestDefaultSocketPathMkdirFail(t *testing.T) {
+	// Create a regular file, then try to use a subdirectory of it as socket dir.
+	// os.MkdirAll will fail because the parent is a file, not a directory.
+	f, err := os.CreateTemp("", "loopai-test-*")
+	if err != nil {
+		t.Fatalf("create temp: %v", err)
+	}
+	f.Close()
+	defer os.Remove(f.Name())
+
+	t.Setenv("LOOPAI_SOCKET_DIR", f.Name()+"/subdir")
+	path := proto.DefaultSocketPath()
+	if path == "" {
+		t.Fatal("DefaultSocketPath returned empty even with MkdirAll failure")
+	}
+	if !strings.HasSuffix(path, "/subdir/loopai.sock") {
+		t.Fatalf("expected path ending with '/subdir/loopai.sock', got %q", path)
 	}
 }
 
