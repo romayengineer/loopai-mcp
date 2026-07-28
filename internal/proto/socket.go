@@ -33,6 +33,10 @@ func DefaultSocketPath() string {
 			dir = "/tmp"
 		}
 	}
+	// MkdirAll failure is tolerated because the caller (Listen) also creates
+	// the directory with the same permissions. If the directory doesn't exist,
+	// Listen will fail with a clear error. This function is best-effort so that
+	// standalone path lookups (e.g. flag defaults) don't fail unnecessarily.
 	if err := os.MkdirAll(dir, SocketDirMode); err != nil {
 		return filepath.Join(dir, SocketFileName)
 	}

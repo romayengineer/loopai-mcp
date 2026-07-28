@@ -76,3 +76,17 @@ func TestStripANSIMixed(t *testing.T) {
 		t.Fatalf("expected 'line1\\nline2', got %q", got)
 	}
 }
+
+func BenchmarkStripANSI(b *testing.B) {
+	data := []byte("\x1b[31mhello \x1b[1mworld\x1b[0m\n\x1b[32mgreen\x1b[0m")
+	for i := 0; i < b.N; i++ {
+		StripANSI(data)
+	}
+}
+
+func BenchmarkStripANSIComplex(b *testing.B) {
+	data := []byte("\x1b[38;5;196m\x1b[1mbold red\x1b[0m \x1b]0;title\x07visible\x1b[K\n\x1b[2J")
+	for i := 0; i < b.N; i++ {
+		StripANSI(data)
+	}
+}

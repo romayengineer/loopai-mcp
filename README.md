@@ -2,6 +2,35 @@
 
 Control any TUI-based AI coding agent (Claude Code, OpenCode, etc.) through **terminal I/O** — the same interface a human user would use. No SDKs, no plugins, no vendor lock-in.
 
+## Development
+
+### Prerequisites
+
+- Go 1.22+
+- `golangci-lint` (optional, for `make lint`): `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest`
+
+### Setup
+
+```
+git clone https://github.com/romayengineer/loopai-mcp
+cd loopai-mcp
+make install-hooks   # installs pre-commit hooks (gofmt, vet, lint, unit tests)
+make build           # builds all binaries
+```
+
+### Available commands
+
+| Command | Description |
+|---|---|
+| `make build` | Build all binaries |
+| `make lint` | Run golangci-lint |
+| `make test-unit` | Run unit tests with race detector |
+| `make test-integration` | Run integration tests (real I/O) |
+| `make test-all` | Run all tests |
+| `make cover` | Show test coverage percentages |
+| `make fmt` | Check gofmt -s formatting |
+| `make vet` | Run go vet |
+
 ## How it works
 
 ```
@@ -68,14 +97,7 @@ See `docs/` for detailed architecture docs:
 
 ## Testing
 
-```
-make test          # unit + integration (excl. smoke)
-make test-all      # unit + integration + smoke
-make test-unit     # fast tests, no external deps
-make test-integration  # real I/O (sockets, PTY)
-```
-
-Integration tests use `//go:build integration` tags and exercise real I/O with no mocking.
+See [Available commands](#available-commands) for the full list of make targets. Integration tests use `//go:build integration` tags and exercise real I/O with no mocking.
 
 ## License
 

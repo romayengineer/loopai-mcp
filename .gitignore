@@ -1,7 +1,25 @@
+# Go binaries
 *.exe
-*.raw
+*.test
+*.out
+*.prof
+
+# Project binaries
 /loopai
 /loopai-backend
 /loopai-capture
+
+# Data files
+*.raw
+
+# Build output
 /tmp/
 dist/
+coverage.*
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~

@@ -5,6 +5,8 @@ import (
 	"flag"
 	"log/slog"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/romayengineer/loopai-mcp/internal/launcher"
@@ -27,7 +29,6 @@ func main() {
 		os.Exit(1)
 	}
 	pc := proto.NewConn(conn)
-	defer pc.Close()
 
 	args := flag.Args()
 	if args == nil {
@@ -36,12 +37,24 @@ func main() {
 
 	proc, err := launcher.Spawn(*client, args)
 	if err != nil {
+		pc.Close()
 		slog.Error("spawn client", "client", *client, "error", err)
 		os.Exit(1)
 	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	defer pc.Close()
 	defer proc.Close()
 
-	ctx := context.Background()
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		sig := <-sigCh
+		slog.Info("shutting down", "signal", sig)
+		cancel()
+		pc.Close()
+	}()
 
 	msg, err := proto.NewMessage(proto.MsgStarted, proto.StartedPayload{
 		Pid:    proc.PID(),

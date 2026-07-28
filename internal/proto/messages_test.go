@@ -107,6 +107,18 @@ func TestMessageJSONStructure(t *testing.T) {
 	}
 }
 
+func ExampleNewMessage() {
+	msg, err := proto.NewMessage(proto.MsgStarted, proto.StartedPayload{
+		Pid:    42,
+		Client: "opencode",
+	})
+	if err != nil {
+		panic(err)
+	}
+	_ = msg
+	// Output:
+}
+
 func TestExitedPayload(t *testing.T) {
 	msg, err := proto.NewMessage(proto.MsgExited, proto.ExitedPayload{Code: 1, Signal: "SIGTERM"})
 	if err != nil {
