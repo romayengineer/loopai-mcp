@@ -64,7 +64,8 @@ The backend watches terminal output. When it detects `go build`/`go test`/`golan
 |---|---|
 | `loopai-backend` | Start the backend (Unix socket at `~/.config/loopai/loopai.sock`) |
 | `loopai "prompt"` | Run a one-shot prompt through the default client |
-| `loopai -client opencode "prompt"` | Run through a different client |
+| `loopai -client opencode` | Open a directory with OpenCode (interactive TUI; prompts are sent by the enforcement loop via PTY) |
+| `loopai -client opencode /path` | Open a specific directory with OpenCode |
 | `loopai -client echo "hello"` | Test with any binary (echo, sh, etc.) |
 
 ### Flags

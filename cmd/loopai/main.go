@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -53,6 +55,17 @@ func main() {
 	args := flag.Args()
 	if args == nil {
 		args = []string{}
+	}
+
+	// OpenCode does not accept a prompt as CLI argument. It opens a directory
+	// in interactive TUI mode. The enforcement loop sends prompts via PTY.
+	// Claude Code accepts a prompt as the first positional argument.
+	if *client == "opencode" {
+		dir := "."
+		if len(args) > 0 && strings.Contains(args[0], string(filepath.Separator)) {
+			dir = args[0]
+		}
+		args = []string{dir}
 	}
 
 	proc, err := launcher.Spawn(*client, args)
