@@ -50,6 +50,11 @@ func PipePTYToBackend(ctx context.Context, sender MessageSender, r io.Reader, re
 			resetter.Reset()
 			data := make([]byte, n)
 			copy(data, buf[:n])
+			preview := string(data)
+			if len(preview) > 120 {
+				preview = preview[:120] + "..."
+			}
+			slog.Debug("output from PTY", "bytes", n, "preview", preview)
 			msg, err := proto.NewMessage(proto.MsgOutput, proto.OutputPayload{Data: data})
 			if err != nil {
 				return fmt.Errorf("create output message: %w", err)
@@ -90,16 +95,19 @@ func PipeBackendToPTY(ctx context.Context, receiver MessageReceiver, proc PtyWri
 				continue
 			}
 			input := []byte(p.Text + "\n")
+			slog.Debug("typed into PTY", "text", p.Text, "len", len(p.Text))
 			if _, err := proc.Write(input); err != nil {
 				return fmt.Errorf("write to PTY: %w", err)
 			}
 
 		case proto.MsgCtrlC:
+			slog.Debug("sending ctrl+c")
 			if err := proc.Signal(os.Interrupt); err != nil {
 				slog.Warn("ctrl+c error", "error", err)
 			}
 
 		case proto.MsgShutdown:
+			slog.Debug("received shutdown")
 			return nil
 
 		default:

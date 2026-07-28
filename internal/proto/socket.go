@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
@@ -100,7 +101,11 @@ func (c *Conn) Send(ctx context.Context, msg Message) error {
 			return fmt.Errorf("set write deadline: %w", err)
 		}
 	}
-	return c.writer.Encode(msg)
+	err := c.writer.Encode(msg)
+	if err == nil {
+		slog.Debug("sent message", "type", msg.Type)
+	}
+	return err
 }
 
 // Receive reads a newline-delimited JSON Message from the connection.
@@ -121,6 +126,7 @@ func (c *Conn) Receive(ctx context.Context) (Message, error) {
 	if err := json.Unmarshal(c.reader.Bytes(), &msg); err != nil {
 		return Message{}, fmt.Errorf("decode message: %w", err)
 	}
+	slog.Debug("received message", "type", msg.Type)
 	return msg, nil
 }
 

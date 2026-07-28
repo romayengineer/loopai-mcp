@@ -94,11 +94,13 @@ func Spawn(client string, args []string) (Process, error) {
 				p.exitCode.Store(int64(state.ExitCode()))
 			}
 		}
+		slog.Debug("process exited", "pid", p.PID(), "exit_code", p.exitCode.Load())
 		close(p.done)
 	}()
 
 	go forwardSignals(cmd, p.done)
 
+	slog.Info("client spawned", "client", client, "pid", p.PID())
 	return p, nil
 }
 
@@ -117,6 +119,8 @@ func forwardSignals(cmd *exec.Cmd, done <-chan struct{}, sigCh ...chan os.Signal
 			if err := cmd.Process.Signal(sig); err != nil {
 				slog.Warn("forward signal", "signal", sig, "error", err)
 			}
+		} else {
+			slog.Debug("signal before process start", "signal", sig)
 		}
 	case <-done:
 	}

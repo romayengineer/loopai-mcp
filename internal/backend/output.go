@@ -12,6 +12,7 @@ type OutputAnalyzer interface {
 	Write(data []byte)
 	Analyze() GateResult
 	Reset()
+	String() string
 }
 
 // OutputBuffer accumulates terminal output between idle events and

@@ -42,6 +42,7 @@ func (d *IdleDetector) Start() {
 		return
 	}
 	d.timer = time.AfterFunc(d.timeout, d.fire)
+	slog.Debug("idle detector started", "timeout", d.timeout)
 }
 
 // Reset resets the idle timer to the full timeout. No-op if not running.
@@ -62,6 +63,7 @@ func (d *IdleDetector) Stop() {
 		return
 	}
 	d.timer.Stop()
+	slog.Debug("idle detector stopped")
 }
 
 func (d *IdleDetector) fire() {

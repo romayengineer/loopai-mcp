@@ -77,7 +77,7 @@ func (b *Backend) Run(ctx context.Context) error {
 			}
 			return fmt.Errorf("accept: %w", err)
 		}
-		slog.Info("launcher connected")
+		slog.Info("launcher connected", "local_addr", conn.LocalAddr().String())
 		pc := proto.NewConn(conn)
 		go b.handler(ctx, pc)
 	}

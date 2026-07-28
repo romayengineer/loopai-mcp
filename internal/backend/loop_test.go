@@ -16,6 +16,7 @@ type mockAnalyzer struct {
 func (m *mockAnalyzer) Write([]byte)        {}
 func (m *mockAnalyzer) Analyze() GateResult { return m.result }
 func (m *mockAnalyzer) Reset()              {}
+func (m *mockAnalyzer) String() string      { return "" }
 
 type mockLauncherConn struct {
 	mu       sync.Mutex

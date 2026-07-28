@@ -33,14 +33,18 @@ func (g *Gate) handleIdle(ctx context.Context, conn LauncherConn) {
 	result := g.output.Analyze()
 	phase := result.Phase
 	res := result.Result
+	rawOutput := g.output.String()
 	g.output.Reset()
 
 	slog.Debug("idle analysis",
 		"phase", phase,
 		"result", res,
+		"output_length", len(rawOutput),
+		"output", rawOutput,
 	)
 
 	send := func(text string) {
+		slog.Debug("sending prompt", "prompt", text, "length", len(text))
 		msg, mErr := proto.NewMessage(proto.MsgType, proto.TypePayload{
 			Text: text,
 		})
@@ -57,30 +61,30 @@ func (g *Gate) handleIdle(ctx context.Context, conn LauncherConn) {
 	case PhaseCompile:
 		switch res {
 		case ResultSuccess:
-			slog.Info("compile passed, next: lint")
+			slog.Info("compile passed, next: lint", "buf_size", len(rawOutput))
 			send("Build succeeded. Now run the linter (golangci-lint run ./...).")
 		case ResultFailure:
-			slog.Info("compile failed, prompting fix")
+			slog.Info("compile failed, prompting fix", "buf_size", len(rawOutput))
 			send(promptCompileFail)
 		}
 
 	case PhaseLint:
 		switch res {
 		case ResultSuccess:
-			slog.Info("lint passed, next: test")
+			slog.Info("lint passed, next: test", "buf_size", len(rawOutput))
 			send("Linting passed. Now run the tests (go test ./...).")
 		case ResultFailure:
-			slog.Info("lint failed, prompting fix")
+			slog.Info("lint failed, prompting fix", "buf_size", len(rawOutput))
 			send(promptLintFail)
 		}
 
 	case PhaseTest:
 		switch res {
 		case ResultSuccess:
-			slog.Info("all gates passed")
+			slog.Info("all gates passed", "buf_size", len(rawOutput))
 			send("All checks passed. The task is complete.")
 		case ResultFailure:
-			slog.Info("tests failed, prompting fix")
+			slog.Info("tests failed, prompting fix", "buf_size", len(rawOutput))
 			send(promptTestFail)
 		}
 
