@@ -4,7 +4,7 @@ Analyze the codebase and apply improvements. Do NOT ask questions or request con
 
 ### Required improvements to find and apply
 
-1. **Tests** — Add missing unit tests and integration tests. Follow the existing test patterns in the project (table-driven tests, mock interfaces, etc.). Every new feature or bugfix needs both.
+1. **Tests** — Use Test-Driven Development: write the test FIRST, then implement the code to make it pass. Add missing unit tests and integration tests. Follow the existing test patterns in the project (table-driven tests, mock interfaces, etc.). Every new feature or bugfix needs both a test and an implementation.
 
 2. **Error handling** — Ensure all errors are checked. Use `fmt.Errorf("context: %w", err)` for error wrapping. No unchecked `Close()`, `Write()`, `Signal()`, or `Kill()` calls.
 
@@ -18,5 +18,6 @@ Analyze the codebase and apply improvements. Do NOT ask questions or request con
 
 ### Rules
 
+- Practice TDD: write the test first, then the implementation. This ensures testable design and complete coverage.
 - Do NOT ask "should I do this?" — just do it.
 - Do NOT list what you're going to do — just do it.
