@@ -13,7 +13,7 @@ import (
 // prompts with the result back to the PTY.
 func HandleLauncher(ctx context.Context, conn LauncherConn) {
 	defer conn.Close()
-	gate := NewGate(NewPromptLoader(DefaultPromptsDir))
+	gate := NewGate(NewPromptLoader(DefaultPromptsDir), ToolRunner{})
 
 	for {
 		select {

@@ -17,18 +17,26 @@ type PromptRenderer interface {
 	Render(name string, vars PromptVars) string
 }
 
+// Runner runs the enforcement tools. Decouples Gate from the concrete
+// tool execution, enabling tests to inject a mock runner.
+type Runner interface {
+	RunAll() []ToolResult
+}
+
 // Gate manages the enforcement loop: running tools and sending prompts.
 type Gate struct {
 	mu          sync.Mutex
 	prompts     PromptRenderer
+	runner      Runner
 	lastEnforce time.Time
 	running     bool
 }
 
-// NewGate creates a Gate with the given prompt renderer.
-func NewGate(prompts PromptRenderer) *Gate {
+// NewGate creates a Gate with the given prompt renderer and runner.
+func NewGate(prompts PromptRenderer, runner Runner) *Gate {
 	return &Gate{
 		prompts: prompts,
+		runner:  runner,
 	}
 }
 
@@ -52,7 +60,7 @@ func (g *Gate) HandleEnforcement(ctx context.Context, conn LauncherConn) {
 	g.mu.Unlock()
 
 	slog.Info("running enforcement tools")
-	results := RunAll()
+	results := g.runner.RunAll()
 
 	g.mu.Lock()
 	g.lastEnforce = time.Now()

@@ -24,9 +24,12 @@ type ToolResult struct {
 	Output string // tool output, truncated to MaxToolOutput
 }
 
+// ToolRunner is a Runner that executes real enforcement tools via exec.Command.
+type ToolRunner struct{}
+
 // RunAll runs build → lint → test in sequence, stopping at the first failure.
 // Each tool is run with a timeout. Returns the results of all tools that ran.
-func RunAll() []ToolResult {
+func (ToolRunner) RunAll() []ToolResult {
 	var results []ToolResult
 
 	r := runBuild()
