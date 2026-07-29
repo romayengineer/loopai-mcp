@@ -3,6 +3,7 @@ package backend
 import (
 	"context"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/romayengineer/loopai-mcp/internal/proto"
@@ -18,8 +19,10 @@ type PromptRenderer interface {
 
 // Gate manages the enforcement loop: running tools and sending prompts.
 type Gate struct {
+	mu          sync.Mutex
 	prompts     PromptRenderer
 	lastEnforce time.Time
+	running     bool
 }
 
 // NewGate creates a Gate with the given prompt renderer.
@@ -34,14 +37,27 @@ func NewGate(prompts PromptRenderer) *Gate {
 // prompt is sent. If any tool fails, a failure prompt with the error output is
 // sent on the first idle event, and the message is repeated on subsequent idles.
 func (g *Gate) HandleEnforcement(ctx context.Context, conn LauncherConn) {
-	if time.Since(g.lastEnforce) < enforceCooldown {
-		slog.Debug("enforcement suppressed by cooldown", "since", time.Since(g.lastEnforce))
+	g.mu.Lock()
+	if g.running {
+		slog.Debug("enforcement skipped — already running")
+		g.mu.Unlock()
 		return
 	}
-	g.lastEnforce = time.Now()
+	if time.Since(g.lastEnforce) < enforceCooldown {
+		slog.Debug("enforcement suppressed by cooldown", "since", time.Since(g.lastEnforce))
+		g.mu.Unlock()
+		return
+	}
+	g.running = true
+	g.mu.Unlock()
 
 	slog.Info("running enforcement tools")
 	results := RunAll()
+
+	g.mu.Lock()
+	g.lastEnforce = time.Now()
+	g.running = false
+	g.mu.Unlock()
 
 	var promptName string
 	vars := PromptVars{
